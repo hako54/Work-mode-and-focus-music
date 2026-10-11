@@ -92,10 +92,10 @@ def make_loop(image: Path, out: Path, size: tuple[int, int] = (1920, 1080), seco
         f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
         f"zoompan=z='1.04+0.04*sin(2*PI*on/{frames})':"
         f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={w}x{h}:fps={FPS},"
-        "noise=alls=5:allf=t,vignette=PI/5,format=yuv420p"
+        "noise=alls=3:allf=t,vignette=PI/5,format=yuv420p"
     )
     run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(FPS), "-t", str(seconds), "-i", str(image),
-         "-vf", vf, "-frames:v", str(frames), "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+         "-vf", vf, "-frames:v", str(frames), "-c:v", "libx264", "-preset", "medium", "-crf", "23",
          "-g", str(FPS * 2), "-pix_fmt", "yuv420p", str(out)])
     return out
 
