@@ -1,0 +1,433 @@
+"""Üretim hattı: günlük video + Short, 15 günlük derleme, onay sonrası yükleme."""
+from __future__ import annotations
+
+import logging
+import random
+import shutil
+from datetime import datetime, time, timedelta
+from pathlib import Path
+from typing import Callable
+from zoneinfo import ZoneInfo
+
+from . import media, metadata, visuals
+from .config import CONFIG
+from .db import Database, iso, parse_iso, tags_of, utcnow
+from .music import get_provider
+from .styles import STYLE_BY_KEY, STYLES, Style, build_image_prompt, build_music_prompt, pick_style
+
+log = logging.getLogger(__name__)
+Progress = Callable[[str], None]
+
+
+def _noop(_: str) -> None:
+    pass
+
+
+class Pipeline:
+    def __init__(self, db: Database):
+        self.db = db
+        self.tz = ZoneInfo(CONFIG.timezone)
+
+    # ------------------------------------------------------------------ helpers
+    def _dir(self, name: str) -> Path:
+        d = CONFIG.media_dir / name
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def recent_titles(self, n: int = 20) -> list[str]:
+        return [r["title"] for r in self.db.query(
+            "SELECT title FROM videos WHERE title IS NOT NULL AND kind != 'short' ORDER BY id DESC LIMIT ?", (n,))]
+
+    def style_performance(self) -> dict[str, float]:
+        rows = self.db.query(
+            "SELECT style_key, AVG(views) v FROM videos WHERE kind = 'daily' AND status = 'published' "
+            "GROUP BY style_key")
+        return {r["style_key"]: float(r["v"] or 0) for r in rows}
+
+    def disabled_styles(self) -> set[str]:
+        raw = self.db.get_setting("disabled_styles")
+        return {s for s in raw.split(",") if s}
+
+    def next_publish_at(self, now: datetime | None = None) -> datetime | None:
+        """Bugünün yayın saati henüz geçmediyse o zaman; geçtiyse None (= hemen yayınla)."""
+        now = now or utcnow()
+        hh, mm = (int(x) for x in self.db.get_setting("publish_time").split(":"))
+        local = now.astimezone(self.tz)
+        target = datetime.combine(local.date(), time(hh, mm), tzinfo=self.tz)
+        # YouTube zamanlanmış yayın için en az birkaç dakika ileri bir zaman ister.
+        return target if target - now > timedelta(minutes=15) else None
+
+    # ------------------------------------------------------------------ daily
+    def create_daily(self, style_key: str | None = None, progress: Progress = _noop) -> int:
+        rng = random.Random()
+        recent = [r["style_key"] for r in self.db.query(
+            "SELECT style_key FROM videos WHERE kind = 'daily' ORDER BY id DESC LIMIT 5")]
+        style = STYLE_BY_KEY[style_key] if style_key else pick_style(
+            recent, self.style_performance(), rng, self.disabled_styles())
+        lo, hi = self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")
+        duration = rng.randint(lo, hi)
+
+        track_id = self.db.add_track(style_key=style.key, prompt=build_music_prompt(style, rng))
+        video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building")
+        try:
+            progress(f"🎵 Müzik üretiliyor: {style.label} (~{duration // 60} dk {duration % 60} sn)")
+            self._make_track_audio(track_id, duration)
+            progress("🖼 Görsel hazırlanıyor")
+            scene = self._make_track_image(track_id, style, rng)
+            progress("✍️ Başlık ve açıklama yazılıyor")
+            self._write_meta(video_id, style, scene)
+            progress("🎬 Video render ediliyor")
+            self._render_daily(video_id)
+            if self.db.get_setting("make_shorts") == "1":
+                progress("📱 Short hazırlanıyor")
+                self._make_short(video_id)
+            self.db.update_video(video_id, status="pending")
+        except Exception as e:
+            self.db.update_video(video_id, status="failed", error=str(e)[:1000])
+            raise
+        return video_id
+
+    def _make_track_audio(self, track_id: int, duration: int) -> None:
+        t = self.db.track(track_id)
+        d = self._dir(f"track_{track_id}")
+        raw = get_provider().compose(t["prompt"], duration, d / "raw.mp3")
+        final = media.master_audio(raw, d / "track.mp3")
+        raw.unlink(missing_ok=True)
+        self.db.update_track(track_id, audio_path=str(final), duration_sec=media.duration(final))
+
+    def _make_track_image(self, track_id: int, style: Style, rng: random.Random) -> str:
+        prompt = build_image_prompt(style, rng=rng)
+        d = self._dir(f"track_{track_id}")
+        img = visuals.generate_image(prompt, d / "image.png", "16:9", seed=rng.randint(1, 2**31))
+        self.db.update_track(track_id, image_path=str(img))
+        return prompt.split(".")[0]
+
+    def _write_meta(self, video_id: int, style: Style, scene: str) -> None:
+        v = self.db.video(video_id)
+        t = self.db.track(v["track_id"])
+        meta = metadata.generate("daily", style, t["duration_sec"], scene, self.recent_titles())
+        self.db.update_track(t["id"], name=meta.track_name)
+        self.db.update_video(video_id, title=meta.title, description=metadata.full_description(meta.description),
+                             tags=meta.tags, thumbnail_text=meta.thumbnail_text)
+
+    def _render_daily(self, video_id: int) -> None:
+        v = self.db.video(video_id)
+        t = self.db.track(v["track_id"])
+        d = self._dir(f"video_{video_id}")
+        loop = media.make_loop(Path(t["image_path"]), d / "loop.mp4")
+        out = media.mux(loop, Path(t["audio_path"]), d / "video.mp4")
+        loop.unlink(missing_ok=True)
+        thumb = visuals.make_thumbnail(Path(t["image_path"]), d / "thumb.jpg", v["thumbnail_text"] or "FOCUS",
+                                       STYLE_BY_KEY[v["style_key"]].label)
+        preview = media.make_preview(Path(t["audio_path"]), d / "preview.mp3")
+        self.db.update_video(video_id, video_path=str(out), thumb_path=str(thumb), preview_path=str(preview))
+
+    def _make_short(self, parent_id: int) -> int:
+        parent = self.db.video(parent_id)
+        t = self.db.track(parent["track_id"])
+        for old in self.db.children(parent_id):
+            self.db.update_video(old["id"], status="rejected")
+        short_id = self.db.add_video(kind="short", track_id=t["id"], parent_id=parent_id,
+                                     style_key=parent["style_key"], status="building")
+        d = self._dir(f"video_{short_id}")
+        length = min(59, self.db.get_int("short_seconds"))
+        start = max(0.0, min(t["duration_sec"] * 0.3, t["duration_sec"] - length - 1))
+        seg = media.cut_segment(Path(t["audio_path"]), d / "segment.mp3", start, length)
+        vimg = visuals.vertical_from(Path(t["image_path"]), d / "vertical.png")
+        loop = media.make_loop(vimg, d / "loop.mp4", size=(1080, 1920))
+        out = media.mux(loop, seg, d / "video.mp4")
+        for p in (loop, seg):
+            p.unlink(missing_ok=True)
+        title = f"{(parent['title'] or 'Focus Music')[:80]} #shorts"
+        desc = metadata.full_description(
+            f"{t['name'] or 'Focus track'} — full version on the channel.\n\n{(parent['description'] or '')[:400]}")
+        self.db.update_video(short_id, title=title, description=desc, tags=tags_of(parent),
+                             video_path=str(out), status="pending")
+        return short_id
+
+    # --------------------------------------------------------------- regenerate
+    def regenerate(self, video_id: int, part: str, progress: Progress = _noop) -> None:
+        """part: music | image | meta"""
+        v = self.db.video(video_id)
+        style = STYLE_BY_KEY.get(v["style_key"] or "", STYLES[0])
+        rng = random.Random()
+        if v["kind"] == "compilation":
+            if part == "music":
+                raise ValueError("Derlemede müzik yenilenmez; reddedip /derleme ile yeniden oluşturun.")
+            if part == "image":
+                progress("🖼 Yeni görsel hazırlanıyor")
+                self._compilation_visuals(video_id, style, rng)
+            else:
+                progress("✍️ Metin yeniden yazılıyor")
+                self._compilation_meta(video_id, style)
+            return
+        if part == "music":
+            t = self.db.track(v["track_id"])
+            self.db.update_track(t["id"], prompt=build_music_prompt(style, rng))
+            progress("🎵 Müzik yeniden üretiliyor")
+            self._make_track_audio(t["id"], int(t["duration_sec"] or self.db.get_int("daily_min_sec")))
+        elif part == "image":
+            progress("🖼 Görsel yeniden üretiliyor")
+            self._make_track_image(v["track_id"], style, rng)
+        elif part == "meta":
+            progress("✍️ Metin yeniden yazılıyor")
+            self._write_meta(video_id, style, style.scenes[0])
+        progress("🎬 Video yeniden render ediliyor")
+        self._render_daily(video_id)
+        if self.db.get_setting("make_shorts") == "1" and part != "meta":
+            self._make_short(video_id)
+
+    # --------------------------------------------------------------- compilation
+    def select_compilation_tracks(self, now: datetime | None = None) -> list[dict]:
+        """En çok dinlenen parçaları seç, sonra kulağa akıcı gelecek sırayla diz."""
+        now = now or utcnow()
+        every = self.db.get_int("compilation_every_days")
+        max_sec = self.db.get_int("compilation_max_min") * 60
+        rows = self.db.query(
+            "SELECT t.*, v.views, v.likes, v.publish_at, v.created_at AS v_created FROM tracks t "
+            "JOIN videos v ON v.track_id = t.id AND v.kind = 'daily' AND v.status IN ('published', 'scheduled') "
+            "WHERE t.audio_path IS NOT NULL")
+        recently_used = {r["track_id"] for r in self.db.query(
+            "SELECT ct.track_id FROM compilation_tracks ct JOIN videos v ON v.id = ct.video_id "
+            "WHERE v.status IN ('pending', 'scheduled', 'published') "
+            "AND v.id IN (SELECT id FROM videos WHERE kind = 'compilation' ORDER BY id DESC LIMIT 2)")}
+
+        scored = []
+        for r in rows:
+            if not Path(r["audio_path"]).exists():
+                continue
+            published = parse_iso(r["publish_at"]) or parse_iso(r["v_created"]) or now
+            age_days = max(1.0, (now - published).total_seconds() / 86400)
+            score = (r["views"] + 5 * r["likes"]) / age_days ** 0.5  # yaşa göre normalize popülerlik
+            fresh = age_days <= every + 1
+            scored.append({"id": r["id"], "style_key": r["style_key"], "name": r["name"],
+                           "duration": r["duration_sec"], "audio_path": r["audio_path"],
+                           "score": score, "fresh": fresh, "used": r["id"] in recently_used})
+
+        # Önce son dönemin parçaları, sonra daha önce derlemeye girmemiş eski hitler.
+        scored.sort(key=lambda x: (not x["fresh"], x["used"], -x["score"]))
+        chosen, total = [], 0.0
+        for s in scored:
+            if s["used"] and not s["fresh"]:
+                continue
+            if total + s["duration"] > max_sec:
+                continue
+            chosen.append(s)
+            total += s["duration"] - 6
+        return order_for_flow(chosen)
+
+    def create_compilation(self, progress: Progress = _noop) -> int:
+        rng = random.Random()
+        min_sec = self.db.get_int("compilation_min_min") * 60
+        chosen = self.select_compilation_tracks()
+        total = sum(c["duration"] - 6 for c in chosen)
+
+        if total < min_sec:  # yeterli parça yoksa en başarılı stilde ek "exclusive" parça üret
+            perf = self.style_performance()
+            style = STYLE_BY_KEY[max(perf, key=perf.get)] if perf else rng.choice(STYLES)
+            while total < min_sec:
+                dur = min(self.db.get_int("daily_max_sec"), int(min_sec - total) + 30)
+                dur = max(dur, self.db.get_int("daily_min_sec"))
+                progress(f"🎵 Derleme için ek parça üretiliyor ({style.label}, {dur // 60} dk)")
+                tid = self.db.add_track(style_key=style.key, prompt=build_music_prompt(style, rng), exclusive=1,
+                                        name=f"Exclusive {len(chosen) + 1}")
+                self._make_track_audio(tid, dur)
+                t = self.db.track(tid)
+                chosen.append({"id": tid, "style_key": style.key, "name": t["name"], "duration": t["duration_sec"],
+                               "audio_path": t["audio_path"], "score": 0.0, "fresh": True, "used": False})
+                total += t["duration_sec"] - 6
+            chosen = order_for_flow(chosen)
+
+        styles = [c["style_key"] for c in chosen]
+        main_style = STYLE_BY_KEY[max(set(styles), key=styles.count)]
+        video_id = self.db.add_video(kind="compilation", style_key=main_style.key, status="building")
+        try:
+            progress(f"🎚 {len(chosen)} parça crossfade ile birleştiriliyor")
+            d = self._dir(f"video_{video_id}")
+            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3")
+            with self.db.tx() as c:
+                for pos, (ch, st) in enumerate(zip(chosen, starts)):
+                    c.execute("INSERT INTO compilation_tracks(video_id, track_id, position, start_sec) "
+                              "VALUES (?, ?, ?, ?)", (video_id, ch["id"], pos, st))
+            progress("🖼 Görsel hazırlanıyor")
+            self._compilation_visuals(video_id, main_style, rng, render=False)
+            progress("✍️ Başlık, açıklama ve zaman damgaları yazılıyor")
+            self._compilation_meta(video_id, main_style)
+            progress("🎬 Uzun video render ediliyor (birkaç dakika sürebilir)")
+            self._compilation_render(video_id)
+            self.db.update_video(video_id, status="pending")
+        except Exception as e:
+            self.db.update_video(video_id, status="failed", error=str(e)[:1000])
+            raise
+        return video_id
+
+    def _compilation_visuals(self, video_id: int, style: Style, rng: random.Random, render: bool = True) -> None:
+        d = self._dir(f"video_{video_id}")
+        visuals.generate_image(build_image_prompt(style, rng=rng), d / "image.png", "16:9", seed=rng.randint(1, 2**31))
+        if render:
+            self._compilation_render(video_id)
+
+    def _compilation_tracklist(self, video_id: int) -> tuple[str, float]:
+        rows = self.db.query(
+            "SELECT ct.start_sec, t.name, t.style_key FROM compilation_tracks ct JOIN tracks t ON t.id = ct.track_id "
+            "WHERE ct.video_id = ? ORDER BY ct.position", (video_id,))
+        lines = [f"{media.fmt_ts(r['start_sec'])} {r['name'] or STYLE_BY_KEY[r['style_key']].label}" for r in rows]
+        mix = CONFIG.media_dir / f"video_{video_id}" / "mix.mp3"
+        return "\n".join(lines), media.duration(mix)
+
+    def _compilation_meta(self, video_id: int, style: Style) -> None:
+        tracklist, total = self._compilation_tracklist(video_id)
+        meta = metadata.generate("compilation", style, total, style.scenes[0], self.recent_titles(),
+                                 extra="This is a curated mix of the channel's most listened recent tracks.")
+        desc = metadata.full_description(meta.description, tracklist)
+        self.db.update_video(video_id, title=meta.title, description=desc, tags=meta.tags,
+                             thumbnail_text=meta.thumbnail_text)
+        v = self.db.video(video_id)
+        if v["video_path"]:  # yalnızca metin değiştiyse küçük resmi güncelle
+            self._compilation_thumb(video_id)
+
+    def _compilation_thumb(self, video_id: int) -> Path:
+        v = self.db.video(video_id)
+        d = self._dir(f"video_{video_id}")
+        _, total = self._compilation_tracklist(video_id)
+        hours = total / 3600
+        sub = f"{round(total / 60)} MIN MIX" if hours < 1 else f"{hours:.1f} HOUR MIX".replace(".0", "")
+        thumb = visuals.make_thumbnail(d / "image.png", d / "thumb.jpg", v["thumbnail_text"] or "FOCUS MIX", sub)
+        self.db.update_video(video_id, thumb_path=str(thumb))
+        return thumb
+
+    def _compilation_render(self, video_id: int) -> None:
+        d = self._dir(f"video_{video_id}")
+        loop = media.make_loop(d / "image.png", d / "loop.mp4")
+        out = media.mux(loop, d / "mix.mp3", d / "video.mp4")
+        loop.unlink(missing_ok=True)
+        preview = media.make_preview(d / "mix.mp3", d / "preview.mp3", max_seconds=600)
+        self.db.update_video(video_id, video_path=str(out), preview_path=str(preview))
+        self._compilation_thumb(video_id)
+
+    def compilation_due(self, now: datetime | None = None) -> bool:
+        now = now or utcnow()
+        every = self.db.get_int("compilation_every_days")
+        last = self.db.one("SELECT created_at FROM videos WHERE kind = 'compilation' "
+                           "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 1")
+        if last:
+            return now - parse_iso(last["created_at"]) >= timedelta(days=every) - timedelta(hours=2)
+        first = self.db.one("SELECT created_at FROM videos WHERE kind = 'daily' AND status IN "
+                            "('scheduled', 'published') ORDER BY id LIMIT 1")
+        return bool(first) and now - parse_iso(first["created_at"]) >= timedelta(days=every) - timedelta(hours=2)
+
+    # ------------------------------------------------------------------ upload
+    def approve(self, video_id: int, progress: Progress = _noop) -> list[str]:
+        """Videoyu (ve varsa Short'unu) YouTube'a yükle. Yüklenen YouTube id'lerini döndürür."""
+        from .youtube import YouTube  # Google kütüphanesi testlerde gerekmesin
+
+        v = self.db.video(video_id)
+        children = [c for c in self.db.children(video_id) if c["status"] == "pending"]
+        if v["status"] != "pending" and not children:
+            raise ValueError(f"Video #{video_id} onay beklemiyor (durum: {v['status']})")
+        items = []
+        if v["status"] == "pending":
+            publish_at = self.next_publish_at()
+            items.append((v, publish_at))
+        else:  # ana video önceden yüklendi, yalnızca Short kaldıysa
+            publish_at = parse_iso(v["publish_at"])
+        base = max(publish_at or utcnow(), utcnow())
+        for child in children:
+            items.append((child, base + timedelta(hours=self.db.get_int("short_delay_hours"))))
+
+        yt = None if CONFIG.dry_run else YouTube()
+        ids: list[str] = []
+        for row, when in items:
+            self.db.update_video(row["id"], status="uploading")
+            try:
+                progress(f"⬆️ Yükleniyor: {row['title']}")
+                if yt is None:
+                    yid = f"dryrun-{row['id']}"
+                else:
+                    yid = yt.upload(Path(row["video_path"]), row["title"], row["description"], tags_of(row), when)
+                    if row["thumb_path"]:
+                        yt.set_thumbnail(yid, Path(row["thumb_path"]))
+                    self._add_to_playlists(yt, row, yid)
+                self.db.update_video(row["id"], youtube_id=yid, status="scheduled" if when else "published",
+                                     publish_at=iso(when or utcnow()), error=None)
+                ids.append(yid)
+                self._cleanup_after_upload(row)
+            except Exception as e:
+                self.db.update_video(row["id"], status="pending", error=str(e)[:1000])
+                raise
+        return ids
+
+    def _add_to_playlists(self, yt, row, yid: str) -> None:
+        names = {"daily": STYLE_BY_KEY[row["style_key"]].label + " • Focus Music",
+                 "compilation": "Long Focus Mixes (30-60 min)",
+                 "short": None}
+        name = names.get(row["kind"])
+        if not name:
+            return
+        key = f"playlist:{name}"
+        pid = self.db.get_setting(key)
+        if not pid:
+            pid = yt.ensure_playlist(name, f"{name} — {CONFIG.channel_name}")
+            self.db.set_setting(key, pid)
+        yt.add_to_playlist(pid, yid)
+
+    def _cleanup_after_upload(self, row) -> None:
+        """Yüklenen mp4'leri sil (yer kazanmak için); ses ve görseller derleme için kalır."""
+        if row["video_path"]:
+            Path(row["video_path"]).unlink(missing_ok=True)
+        if row["kind"] == "short":
+            shutil.rmtree(CONFIG.media_dir / f"video_{row['id']}", ignore_errors=True)
+        if row["kind"] == "compilation":
+            (CONFIG.media_dir / f"video_{row['id']}" / "mix.mp3").unlink(missing_ok=True)
+
+    def reject(self, video_id: int) -> None:
+        for row in [self.db.video(video_id), *self.db.children(video_id)]:
+            self.db.update_video(row["id"], status="rejected")
+            if row["video_path"]:
+                Path(row["video_path"]).unlink(missing_ok=True)
+
+    # ------------------------------------------------------------------ stats
+    def refresh_stats(self) -> int:
+        if CONFIG.dry_run:
+            return 0
+        from .youtube import YouTube
+
+        rows = self.db.query("SELECT id, youtube_id, status, publish_at FROM videos "
+                             "WHERE youtube_id IS NOT NULL AND status IN ('scheduled', 'published')")
+        if not rows:
+            return 0
+        stats = YouTube().stats([r["youtube_id"] for r in rows])
+        now = utcnow()
+        for r in rows:
+            s = stats.get(r["youtube_id"])
+            if not s:
+                continue
+            status = r["status"]
+            pub = parse_iso(r["publish_at"])
+            if status == "scheduled" and pub and pub <= now and s["privacy"] == "public":
+                status = "published"
+            self.db.update_video(r["id"], views=s["views"], likes=s["likes"], privacy=s["privacy"],
+                                 status=status, stats_updated_at=iso(now))
+        return len(rows)
+
+    def locked_private(self) -> list:
+        """Yayın zamanı geçtiği halde hâlâ 'private' olanlar: API denetimi (audit) yapılmamış olabilir."""
+        now = utcnow()
+        return [r for r in self.db.query(
+            "SELECT * FROM videos WHERE status = 'scheduled' AND privacy = 'private' AND youtube_id IS NOT NULL")
+            if parse_iso(r["publish_at"]) and parse_iso(r["publish_at"]) < now - timedelta(hours=2)]
+
+
+def order_for_flow(tracks: list[dict]) -> list[dict]:
+    """En popüler parçayla başla, sonra enerji seviyesi en yakın parçayla devam et (yumuşak geçişler)."""
+    if len(tracks) <= 2:
+        return list(tracks)
+    remaining = sorted(tracks, key=lambda x: -x["score"])
+    order = [remaining.pop(0)]
+    while remaining:
+        cur = STYLE_BY_KEY[order[-1]["style_key"]].energy
+        nxt = min(remaining, key=lambda x: (abs(STYLE_BY_KEY[x["style_key"]].energy - cur),
+                                            x["style_key"] == order[-1]["style_key"], -x["score"]))
+        remaining.remove(nxt)
+        order.append(nxt)
+    return order
