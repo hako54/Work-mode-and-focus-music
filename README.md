@@ -44,7 +44,7 @@ Derlemede parçalar en popüler olanla başlar ve enerji seviyesi en yakın par�
 
 ```
 09:00  (2 günde bir) Bot romantik piyano stilini seçer → hedef süre seçilir (80–180 dk arası rastgele)
-       → 3–5 dk'lık ~20–40 yeni parça üretilir (ElevenLabs, sözsüz) → 6 sn crossfade ile tek mix
+       → 3–5 dk'lık ~20–40 yeni parça üretilir (ElevenLabs, sözsüz) → 12 sn yumuşak geçişlerle tek mix
        → görsel (Stability) → başlık/açıklama + zaman damgalı parça listesi (Claude) → 1080p video + Short
        → Telegram'a onaya gelir
 Onay → YouTube'a yüklenir, yayın saatinde açılır, "Romantic Piano • Long Mixes" ve stil playlist'ine eklenir
@@ -55,20 +55,24 @@ Her mix tek bir stilde kalır (referans videodaki gibi bütünlüklü bir dinlem
 | Anahtar | Stil | Enerji |
 |---|---|---|
 | `romantic_solo_piano` | Romantic Solo Piano | 2 |
-| `piano_strings_love` | Piano & Strings Love Theme | 3 |
+| `spa_massage_piano` | Spa & Massage Piano | 1 |
+| `dreamy_ambient_love` | Dreamy Ambient Love | 1 |
+| `piano_strings_love` | Piano & Warm Strings | 2 |
 | `moonlight_piano` | Moonlight Night Piano | 1 |
 | `piano_cello_romance` | Piano & Cello Romance | 2 |
 | `candlelight_jazz_piano` | Candlelight Jazz Piano | 3 |
-| `wedding_piano` | Wedding & First Dance Piano | 3 |
+| `wedding_piano` | Wedding & First Dance Piano | 2 |
 | `rainy_romance_piano` | Rainy Romance Piano | 1 |
 | `classical_romance_piano` | Classical Romantic Piano | 2 |
+
+**Spa / masaj yumuşaklığı:** Tüm stiller sıcak orta-pes registerda, yavaş (48–70 BPM), uzun notalı ve yumuşak pad'li olacak şekilde yazıldı. Müzik üretim talimatında tiz, ince, çan/zil benzeri sesler ve sert vuruşlar açıkça yasaklandı. Üretilen her parça ayrıca yumuşatılır: tizler kısılır, ani yükselmeler bastırılır, 5 sn yumuşak girişle başlar ve 10 sn'de söner (`/ayar soft_master 0` ile kapatılabilir). Parçalar arasındaki geçiş 12 sn'dir (`/ayar mix_crossfade_sec 4–20`).
 
 ### 🔥 Şömine modu (varsayılan açık)
 
 Videoların arka planı, gerçek bir şöminede yanan ateş gibi atlamasız dönen bir döngüdür. Müziğin altında da hafif ateş çıtırtısı çalar.
 
 - **Arka plan:** Bota Telegram'dan bir şömine **videosu** gönderin (10–40 sn yeter, en fazla 20 MB). Bot videonun sonunu başına yumuşakça bindirir; böylece video takılmadan sonsuz döner. Birden fazla video gönderirseniz her mixte farklı biri kullanılır. Hiç video yoksa **fotoğraflar** kullanılır: repodaki `assets/fireplace/fireplace-01.jpg` ve bota gönderdiğiniz fotoğraflar, alevleri dalgalanan, ışığı titreyen ve korları parlayan 12 saniyelik bir döngüye çevrilir.
-- **Çıtırtı sesi:** Gönderdiğiniz videonun kendi sesi varsa o kullanılır (en doğal sonuç). Yoksa ElevenLabs ile bir kez şömine sesi üretilip saklanır. O da olmazsa sentezlenmiş çıtırtı kullanılır. Ses seviyesi `/ayar fire_volume 30` (0 = kapalı) ile ayarlanır.
+- **Çıtırtı sesi:** Gönderdiğiniz videonun kendi sesi varsa o kullanılır (en doğal sonuç). Yoksa ElevenLabs ile bir kez şömine sesi üretilip saklanır. O da olmazsa sentezlenmiş çıtırtı kullanılır. Ses seviyesi `/ayar fire_volume 20` (0 = kapalı) ile ayarlanır.
 - `/arkaplan` arka planları listeler, `/arkaplan sil <ad>` siler. `/ayar fireplace 0` ile şömine yerine yapay zeka sahne görsellerine dönülür.
 - Hazırlanan döngüler `/data/assets/cache` içinde saklanır; her videoda yeniden işlenmez. Hareketli ateş çok detaylı olduğu için video dosyası büyüktür: 3 saatlik bir mix yaklaşık 2,5 GB olur (yükleme sonrası silinir).
 

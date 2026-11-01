@@ -41,6 +41,8 @@ SETTING_HELP: dict[str, str] = {
     "library_keep_days": "Parça sesleri kaç gün saklansın (0 = hep)",
     "fireplace": "Arka plan şömine döngüsü olsun (1/0; 0 = yapay zeka sahne görseli)",
     "fire_volume": "Ateş çıtırtısı ses seviyesi (0-100, 0 = kapalı)",
+    "soft_master": "Tiz tonları yumuşat, ani yükselmeleri bastır (1/0)",
+    "mix_crossfade_sec": "Mixte parçalar arası geçiş süresi (sn, 4-20)",
     "make_shorts": "Short üret (1/0)",
     "short_seconds": "Short uzunluğu (sn, en fazla 59)",
     "short_delay_hours": "Short yayın gecikmesi (saat)",
@@ -99,9 +101,12 @@ ROMANTIC = Profile(
     main_kind="mix",
     default_channel_name="Romantic Piano Moments",
     music_purpose=(
-        "Romantic instrumental piano music for love, candlelit evenings, relaxation and sleep: tender, "
-        "heartfelt and memorable melody, expressive but gentle dynamics, no harsh or loud moments, "
-        "slow emotional build, warm intimate sound, gentle intro and soft natural ending."
+        "Soft romantic relaxation music in the style of spa and massage therapy music, for love, candlelit "
+        "evenings, relaxing and sleep: very gentle, warm and mellow tone, slow legato melody mostly in the "
+        "middle and lower register, long sustained notes over soft warm ambient pads, smooth gradual "
+        "transitions between phrases, steady calm dynamics. No bright, thin, piercing or high-pitched notes, "
+        "no sparkly bells or chimes, no sharp attacks, no sudden changes or loud moments. "
+        "Slow fade-in intro and long soft fade-out ending."
     ),
     image_style=("Dreamy romantic cinematic painting, soft golden and rose light, gentle bokeh, warm pastel colors, "
                  "elegant and emotional atmosphere, highly detailed"),
@@ -132,7 +137,9 @@ Do not add hashtags; they are appended separately.""",
         "mix_reuse_pct": "25",
         "library_keep_days": "120",
         "fireplace": "1",
-        "fire_volume": "30",
+        "fire_volume": "20",
+        "soft_master": "1",
+        "mix_crossfade_sec": "12",
     },
 )
 

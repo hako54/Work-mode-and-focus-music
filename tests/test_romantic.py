@@ -129,3 +129,25 @@ def test_reuse_respects_cap_and_prune(pipe):
         c.execute("UPDATE tracks SET created_at = ?", (old,))
     assert pipe.prune_library() > 0
     assert db.one("SELECT COUNT(*) n FROM tracks WHERE audio_path IS NOT NULL")["n"] == 0
+
+
+def test_prompts_are_soft_spa_style_without_bright_instruments():
+    rng = random.Random(5)
+    bright = ("glockenspiel", "celesta", "bells", "harp", "bright grand")
+    for st in ROMANTIC_STYLES:
+        assert st.bpm[1] <= 70
+        assert not any(b in " ".join(st.instruments).lower() for b in bright)
+        p = build_music_prompt(st, rng)
+        assert "spa and massage" in p and "No bright, thin, piercing or high-pitched notes" in p
+
+
+def test_soft_master_applied_and_crossfade_setting(tmp_path):
+    db = Database(tmp_path / "s.db")
+    assert db.get_setting("soft_master") == "1" and db.get_int("mix_crossfade_sec") == 12
+    src = tmp_path / "a.mp3"
+    import subprocess
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=6000:duration=20", str(src)],
+                   check=True, capture_output=True)
+    hard = media.master_audio(src, tmp_path / "h.mp3")
+    soft = media.master_audio(src, tmp_path / "s.mp3", fade_in=5, fade_out=10, soft=True)
+    assert media.duration(soft) == pytest.approx(media.duration(hard), abs=0.2)

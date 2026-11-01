@@ -653,6 +653,10 @@ def validate_setting(key: str, value: str) -> str | None:
         return "0 veya 1 olmalı"
     if key == "fire_volume" and not 0 <= n <= 100:
         return "0–100 arası olmalı"
+    if key == "soft_master" and n not in (0, 1):
+        return "0 veya 1 olmalı"
+    if key == "mix_crossfade_sec" and not 4 <= n <= 20:
+        return "4–20 sn arası olmalı"
     if key == "compilation_every_days" and not 1 <= n <= 90:
         return "1–90 gün arası olmalı"
     return None

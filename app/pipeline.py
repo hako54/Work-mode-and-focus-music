@@ -94,7 +94,10 @@ class Pipeline:
         t = self.db.track(track_id)
         d = self._dir(f"track_{track_id}")
         raw = get_provider().compose(t["prompt"], duration, d / "raw.mp3")
-        final = media.master_audio(raw, d / "track.mp3")
+        if self.db.get_setting("soft_master") == "1":  # romantic: uzun yumuşak giriş/çıkış, tizler kısık
+            final = media.master_audio(raw, d / "track.mp3", fade_in=5.0, fade_out=10.0, soft=True)
+        else:
+            final = media.master_audio(raw, d / "track.mp3")
         raw.unlink(missing_ok=True)
         self.db.update_track(track_id, audio_path=str(final), duration_sec=media.duration(final))
 
@@ -428,7 +431,7 @@ class Pipeline:
         lo, hi = sorted((self.db.get_int("mix_min_min"), self.db.get_int("mix_max_min")))
         target = (minutes or rng.randint(lo, hi)) * 60
         tlo, thi = sorted((self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")))
-        x = MIX_XFADE
+        x = float(self.db.get_setting("mix_crossfade_sec") or MIX_XFADE)
 
         unused, reusable = self.library_tracks(style.key)
         fresh: list[dict] = []

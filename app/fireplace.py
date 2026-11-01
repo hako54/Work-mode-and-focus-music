@@ -248,7 +248,7 @@ def ambience_bed() -> Path:
             return _elevenlabs_fire(out)
         except Exception as e:  # noqa: BLE001
             log.warning("ElevenLabs ateş sesi üretilemedi (%s), sentez kullanılacak", e)
-    out = cache_dir() / "fire_procedural_v1.m4a"  # 3) sentez
+    out = cache_dir() / "fire_procedural_v2.m4a"  # 3) sentez
     if not out.exists():
         synth_crackle(out)
     return out
@@ -349,7 +349,7 @@ def synth_crackle(out: Path, seconds: int | None = None, seed: int = 11) -> Path
         roar = _fft_filter(rng.standard_normal(n), 30, 280, slope=-1.0)
         roar *= 0.22 / np.std(roar) * slow_mod(4, 0.35)
         hiss = _fft_filter(rng.standard_normal(n), 1800, 6500)
-        hiss *= 0.025 / np.std(hiss) * slow_mod(3, 0.5)
+        hiss *= 0.01 / np.std(hiss) * slow_mod(3, 0.5)
         out_lr[:, ch] = roar + hiss
 
     def add_event(at: int, sig: np.ndarray, pan: float) -> None:
@@ -367,7 +367,7 @@ def synth_crackle(out: Path, seconds: int | None = None, seed: int = 11) -> Path
             ln = int(SR * rng.uniform(0.002, 0.02))
             env = np.exp(-np.arange(ln) / (SR * rng.uniform(0.0008, 0.005)))
             burst = rng.standard_normal(ln) * env
-            burst = np.diff(burst, prepend=0) * 0.7 + burst * 0.3  # tiz, kuru "tık"
+            burst = np.diff(burst, prepend=0) * 0.25 + burst * 0.75  # yumuşak "pıt" (tizi az)
             add_event(start, burst * amp * (0.6 if k else 1.0), pan)
         if amp > 0.25 and rng.random() < 0.5:  # büyük odun patlaması: kısa gövde sesi
             ln = int(SR * 0.06)
@@ -385,7 +385,8 @@ def synth_crackle(out: Path, seconds: int | None = None, seed: int = 11) -> Path
     loop.astype("<f4").tofile(raw)
     try:
         media.run(["ffmpeg", "-y", "-f", "f32le", "-ar", str(SR), "-ac", "2", "-i", str(raw),
-                   "-af", "loudnorm=I=-20:TP=-2:LRA=11", "-ar", str(SR), "-c:a", "aac", "-b:a", "160k", str(out)])
+                   "-af", "lowpass=f=4500,highshelf=f=2500:g=-4,loudnorm=I=-20:TP=-2:LRA=11", "-ar", str(SR),
+                   "-c:a", "aac", "-b:a", "160k", str(out)])
     finally:
         raw.unlink(missing_ok=True)
     return out

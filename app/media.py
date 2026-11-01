@@ -27,13 +27,22 @@ def duration(path: Path) -> float:
     return float(json.loads(proc.stdout)["format"]["duration"])
 
 
-def master_audio(src: Path, out: Path, fade_in: float = 2.0, fade_out: float = 5.0) -> Path:
-    """YouTube için -14 LUFS'e normalize et, yumuşak giriş/çıkış ekle."""
+# Spa/masaj müziği gibi yumuşak ton: tizleri kıs, sert vuruşları ve ani yükselmeleri bastır.
+SOFT_CHAIN = (
+    "highshelf=f=4500:g=-5:t=s:w=0.7,lowpass=f=10000:p=1,"
+    "acompressor=threshold=-22dB:ratio=2.5:attack=40:release=600:knee=6:makeup=2"
+)
+
+
+def master_audio(src: Path, out: Path, fade_in: float = 2.0, fade_out: float = 5.0, soft: bool = False) -> Path:
+    """YouTube için -14 LUFS'e normalize et, yumuşak giriş/çıkış ekle (soft: tiz ve sertlikleri yumuşat)."""
     total = duration(src)
+    fade_in = min(fade_in, total / 4)
     fade_out = min(fade_out, total / 4)
     af = (
-        f"afade=t=in:d={fade_in},afade=t=out:st={max(0.0, total - fade_out):.2f}:d={fade_out},"
-        "loudnorm=I=-14:TP=-1.5:LRA=11"
+        (SOFT_CHAIN + "," if soft else "") +
+        f"afade=t=in:d={fade_in}:curve=qsin,afade=t=out:st={max(0.0, total - fade_out):.2f}:d={fade_out}:curve=qsin,"
+        f"loudnorm=I={-16 if soft else -14}:TP=-1.5:LRA={7 if soft else 11}"
     )
     run(["ffmpeg", "-y", "-i", str(src), "-af", af, "-ar", "44100", "-b:a", "192k", str(out)])
     return out
@@ -60,14 +69,14 @@ def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0, bed: Pa
     parts, prev = [], "[0:a]"
     for i in range(1, len(sources)):
         label = f"[a{i}]"
-        parts.append(f"{prev}[{i}:a]acrossfade=d={xfade}:c1=tri:c2=tri{label}")
+        parts.append(f"{prev}[{i}:a]acrossfade=d={xfade}:c1=qsin:c2=qsin{label}")  # eşit güçlü, yumuşak geçiş
         prev = label
     if bed is not None and bed_volume > 0:
         cmd += ["-stream_loop", "-1", "-i", str(bed)]
         bi = len(sources)
         fade = min(8.0, total / 4)
         parts.append(f"[{bi}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=44100:"
-                     f"channel_layouts=stereo,volume={bed_volume:.3f},afade=t=in:d=3,"
+                     f"channel_layouts=stereo,lowpass=f=5000,volume={bed_volume:.3f},afade=t=in:d=3,"
                      f"afade=t=out:st={total - fade:.3f}:d={fade:.3f}[bed]")
         parts.append(f"{prev}aformat=sample_rates=44100:channel_layouts=stereo[mus]")
         parts.append("[mus][bed]amix=inputs=2:duration=first:normalize=0[mixed]")
