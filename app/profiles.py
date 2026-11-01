@@ -39,6 +39,8 @@ SETTING_HELP: dict[str, str] = {
     "mix_max_min": "Mix en uzun süre (dk; 180 = 3 sa)",
     "mix_reuse_pct": "Mix'in en fazla yüzde kaçı eski parçalardan olsun (maliyet düşürür)",
     "library_keep_days": "Parça sesleri kaç gün saklansın (0 = hep)",
+    "fireplace": "Arka plan şömine döngüsü olsun (1/0; 0 = yapay zeka sahne görseli)",
+    "fire_volume": "Ateş çıtırtısı ses seviyesi (0-100, 0 = kapalı)",
     "make_shorts": "Short üret (1/0)",
     "short_seconds": "Short uzunluğu (sn, en fazla 59)",
     "short_delay_hours": "Short yayın gecikmesi (saat)",
@@ -129,6 +131,8 @@ Do not add hashtags; they are appended separately.""",
         "mix_max_min": "180",
         "mix_reuse_pct": "25",
         "library_keep_days": "120",
+        "fireplace": "1",
+        "fire_volume": "30",
     },
 )
 

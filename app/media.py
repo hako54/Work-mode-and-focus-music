@@ -39,8 +39,12 @@ def master_audio(src: Path, out: Path, fade_in: float = 2.0, fade_out: float = 5
     return out
 
 
-def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0) -> list[float]:
-    """Parçaları crossfade ile birleştir. Her parçanın başlangıç saniyesini döndürür."""
+def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0, bed: Path | None = None,
+                     bed_volume: float = 0.3) -> list[float]:
+    """Parçaları crossfade ile birleştir. Her parçanın başlangıç saniyesini döndürür.
+
+    bed verilirse (ör. ateş çıtırtısı) baştan sona döngüyle müziğin altına karıştırılır.
+    """
     if not sources:
         raise MediaError("Birleştirilecek parça yok")
     durs = [duration(p) for p in sources]
@@ -48,9 +52,7 @@ def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0) -> list
     for d in durs:
         starts.append(round(t, 2))
         t += d - xfade
-    if len(sources) == 1:
-        run(["ffmpeg", "-y", "-i", str(sources[0]), "-b:a", "192k", str(out)])
-        return starts
+    total = t + xfade
 
     cmd = ["ffmpeg", "-y"]
     for p in sources:
@@ -60,6 +62,19 @@ def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0) -> list
         label = f"[a{i}]"
         parts.append(f"{prev}[{i}:a]acrossfade=d={xfade}:c1=tri:c2=tri{label}")
         prev = label
+    if bed is not None and bed_volume > 0:
+        cmd += ["-stream_loop", "-1", "-i", str(bed)]
+        bi = len(sources)
+        fade = min(8.0, total / 4)
+        parts.append(f"[{bi}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=44100:"
+                     f"channel_layouts=stereo,volume={bed_volume:.3f},afade=t=in:d=3,"
+                     f"afade=t=out:st={total - fade:.3f}:d={fade:.3f}[bed]")
+        parts.append(f"{prev}aformat=sample_rates=44100:channel_layouts=stereo[mus]")
+        parts.append("[mus][bed]amix=inputs=2:duration=first:normalize=0[mixed]")
+        prev = "[mixed]"
+    elif len(sources) == 1:
+        run(["ffmpeg", "-y", "-i", str(sources[0]), "-b:a", "192k", str(out)])
+        return starts
     parts.append(f"{prev}loudnorm=I=-14:TP=-1.5:LRA=11[out]")
     cmd += ["-filter_complex", ";".join(parts), "-map", "[out]", "-ar", "44100", "-b:a", "192k", str(out)]
     run(cmd)

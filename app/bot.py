@@ -11,9 +11,9 @@ from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import profiles
+from . import fireplace, profiles
 from .config import CONFIG
 from .db import Database, parse_iso, utcnow
 from .media import fmt_ts
@@ -40,6 +40,12 @@ HELP_PRODUCTION = {
 /uret [stil] – şimdi uzun romantik mix üret (1 sa 20 dk – 3 sa+)
 /demo [dk] [stil] – kısa deneme mix'i (varsayılan 10 dk, düşük maliyet)
 /kutuphane – parça kütüphanesi (yeniden kullanılabilir parçalar)
+
+<b>🔥 Şömine</b>
+Bota şömine <b>videosu</b> (10–40 sn, en fazla 20 MB) ya da <b>fotoğrafı</b> gönderin: arka plan döngüsü olur.
+Videonun kendi ateş sesi varsa çıtırtı olarak o kullanılır.
+/arkaplan – arka planları listele · /arkaplan sil &lt;ad&gt;
+/ayar fireplace 0|1 · /ayar fire_volume 0–100
 """,
 }
 
@@ -83,10 +89,13 @@ class Bot:
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
-            "demo": self.cmd_demo,
+            "demo": self.cmd_demo, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
+        media_filter = (filters.VIDEO | filters.PHOTO | filters.ANIMATION | filters.Document.VIDEO
+                        | filters.Document.IMAGE)
+        self.app.add_handler(MessageHandler(admin & media_filter, self.on_media))
         self.app.add_handler(CallbackQueryHandler(self.on_button))
         # Yetkisiz kullanıcıya kendi ID'sini söyle (ilk kurulum için).
         self.app.add_handler(CommandHandler("start", self.cmd_whoami, filters=~admin))
@@ -466,6 +475,50 @@ class Bot:
             "gelecek. Yayınlamak istemezseniz kartta ❌ Reddet deyin; parçalar bir sonraki mixte kullanılır.")
         asyncio.create_task(self.do_mix(key, minutes))
 
+    async def on_media(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.message
+        if msg.photo:
+            f, name = msg.photo[-1], "photo.jpg"
+        else:
+            f = msg.video or msg.animation or msg.document
+            name = getattr(f, "file_name", None) or ("fireplace.mp4" if (msg.video or msg.animation) else "upload")
+        if (f.file_size or 0) > 20 * 1024 * 1024:
+            await msg.reply_text("⚠️ Telegram botları 20 MB'tan büyük dosyayı indiremez. Videoyu 10–30 sn'ye "
+                                 "kısaltıp ya da normal (sıkıştırılmış) video olarak tekrar gönderin.")
+            return
+        await msg.reply_text("🔥 Alındı. Dikişsiz döngü hazırlanıyor (fotoğrafta ~5 dk, videoda ~1 dk)…")
+        suffix = Path(name).suffix or ".bin"
+        tmp = fireplace.cache_dir() / f"upload_{f.file_unique_id}{suffix}"
+        try:
+            await (await f.get_file()).download_to_drive(tmp)
+            bg = await self.run_heavy("şömine arka planı", lambda progress: fireplace.save_upload(tmp, name))
+            loop = fireplace.loop_for(bg, (1920, 1080))
+            note = ("Bu video(lar) varken fotoğraflar kullanılmaz; ateş sesi videonun kendi sesinden alınır "
+                    "(sessizse sentez çıtırtı)." if bg.kind == "video" else
+                    "Fotoğraf alevleri dalgalanan bir döngüye çevrildi.")
+            with open(loop, "rb") as fh:
+                await msg.reply_video(fh, caption=f"✅ Arka plan eklendi: {bg.name}\n{note}\n"
+                                                  f"Toplam: {len(fireplace.backgrounds())} · /arkaplan",
+                                      read_timeout=120, write_timeout=120)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Arka plan yüklenemedi")
+            tmp.unlink(missing_ok=True)
+            await msg.reply_text(f"⚠️ Arka plan eklenemedi: {str(e)[:500]}")
+
+    async def cmd_backgrounds(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if len(ctx.args) == 2 and ctx.args[0] == "sil":
+            ok = fireplace.remove(ctx.args[1])
+            await update.message.reply_text("🗑 Silindi." if ok else "Bulunamadı (repodaki varsayılan fotoğraf silinemez).")
+            return
+        bgs = fireplace.backgrounds()
+        lines = [f"{'🎬' if b.kind == 'video' else '🖼'} <code>{html.escape(b.name)}</code>"
+                 + (" (varsayılan)" if b.path.parent == fireplace.BUNDLED_DIR else "") for b in bgs]
+        state = "açık" if self.db.get_setting("fireplace") == "1" else "kapalı"
+        await update.message.reply_html(
+            f"<b>Şömine arka planları</b> (mod: {state}, çıtırtı: %{self.db.get_setting('fire_volume') or 0})\n"
+            + ("\n".join(lines) or "Yok") +
+            "\n\nYeni eklemek için bota video ya da fotoğraf gönderin. Silmek: /arkaplan sil &lt;ad&gt;")
+
     async def cmd_library(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lines = []
         for s in active_styles():
@@ -596,6 +649,10 @@ def validate_setting(key: str, value: str) -> str | None:
         return "1–30 gün arası olmalı"
     if key == "mix_reuse_pct" and not 0 <= n <= 80:
         return "0–80 arası olmalı"
+    if key == "fireplace" and n not in (0, 1):
+        return "0 veya 1 olmalı"
+    if key == "fire_volume" and not 0 <= n <= 100:
+        return "0–100 arası olmalı"
     if key == "compilation_every_days" and not 1 <= n <= 90:
         return "1–90 gün arası olmalı"
     return None

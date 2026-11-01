@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import media, metadata, profiles, visuals
+from . import fireplace, media, metadata, profiles, visuals
 from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
@@ -147,11 +147,16 @@ class Pipeline:
                                      style_key=parent["style_key"], status="building")
         d = self._dir(f"video_{short_id}")
         seg = media.cut_segment(audio, d / "segment.mp3", start, length)
-        vimg = visuals.vertical_from(image, d / "vertical.png")
-        loop = media.make_loop(vimg, d / "loop.mp4", size=(1080, 1920))
+        bg = None if parent["track_id"] else self._background(parent_id)
+        if bg:
+            loop = fireplace.loop_for(bg, (1080, 1920))
+        else:
+            vimg = visuals.vertical_from(image, d / "vertical.png")
+            loop = media.make_loop(vimg, d / "loop.mp4", size=(1080, 1920))
         out = media.mux(loop, seg, d / "video.mp4")
-        for p in (loop, seg):
-            p.unlink(missing_ok=True)
+        seg.unlink(missing_ok=True)
+        if not bg:
+            loop.unlink(missing_ok=True)
         title = f"{(parent['title'] or 'Music')[:80]} #shorts"
         what = "full version" if parent["kind"] == "daily" else f"full {media.fmt_long(media.duration(audio))} mix"
         desc = metadata.full_description(
@@ -277,9 +282,26 @@ class Pipeline:
             raise
         return video_id
 
+    def fireplace_on(self) -> bool:
+        return self.db.get_setting("fireplace") == "1" and bool(fireplace.backgrounds())
+
+    def _background(self, video_id: int) -> fireplace.Background | None:
+        """Bu video için seçilmiş şömine arka planı (yoksa None = normal görsel)."""
+        f = CONFIG.media_dir / f"video_{video_id}" / "background.txt"
+        return fireplace.find_background(f.read_text().strip()) if f.exists() else None
+
     def _compilation_visuals(self, video_id: int, style: Style, rng: random.Random, render: bool = True) -> None:
         d = self._dir(f"video_{video_id}")
-        visuals.generate_image(build_image_prompt(style, rng=rng), d / "image.png", "16:9", seed=rng.randint(1, 2**31))
+        marker = d / "background.txt"
+        if self.fireplace_on():
+            prev = marker.read_text().strip() if marker.exists() else None
+            bg = fireplace.pick_background(rng, avoid=prev)
+            marker.write_text(bg.name)
+            fireplace.still_frame(bg, d / "image.png")
+        else:
+            marker.unlink(missing_ok=True)
+            visuals.generate_image(build_image_prompt(style, rng=rng), d / "image.png", "16:9",
+                                   seed=rng.randint(1, 2**31))
         if render:
             self._compilation_render(video_id)
 
@@ -298,7 +320,12 @@ class Pipeline:
         extra = ("This is a curated mix of the channel's most listened recent tracks." if kind == "compilation"
                  else f"One continuous {media.fmt_long(total)} mix of {n} tender romantic piano pieces, "
                       "smoothly crossfaded, no ads or interruptions inside the music.")
-        meta = metadata.generate(kind, style, total, style.scenes[0], self.recent_titles(), extra=extra)
+        scene = style.scenes[0]
+        if self._background(video_id):
+            scene = "a cozy wood fireplace burning at night, warm flickering flames and glowing embers"
+            if self.db.get_setting("fire_volume") not in ("", "0"):
+                extra += " Soft crackling fireplace sounds play gently under the music."
+        meta = metadata.generate(kind, style, total, scene, self.recent_titles(), extra=extra)
         desc = metadata.full_description(meta.description, tracklist)
         self.db.update_video(video_id, title=meta.title, description=desc, tags=meta.tags,
                              thumbnail_text=meta.thumbnail_text)
@@ -318,9 +345,11 @@ class Pipeline:
 
     def _compilation_render(self, video_id: int) -> None:
         d = self._dir(f"video_{video_id}")
-        loop = media.make_loop(d / "image.png", d / "loop.mp4")
+        bg = self._background(video_id)
+        loop = fireplace.loop_for(bg, (1920, 1080)) if bg else media.make_loop(d / "image.png", d / "loop.mp4")
         out = media.mux(loop, d / "mix.mp3", d / "video.mp4")
-        loop.unlink(missing_ok=True)
+        if not bg:  # şömine döngüleri önbellekte kalır, tekrar kullanılır
+            loop.unlink(missing_ok=True)
         preview = media.make_preview(d / "mix.mp3", d / "preview.mp3", max_seconds=600)
         self.db.update_video(video_id, video_path=str(out), preview_path=str(preview))
         self._compilation_thumb(video_id)
@@ -450,12 +479,18 @@ class Pipeline:
             chosen = spread_in(fresh, reused)
             progress(f"🎚 {len(chosen)} parça crossfade ile birleştiriliyor ({media.fmt_long(total)})")
             d = self._dir(f"video_{video_id}")
-            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3", xfade=x)
+            vol = self.db.get_int("fire_volume") if self.db.get_setting("fire_volume") else 0
+            bed = None
+            if vol > 0:
+                progress("🔥 Ateş çıtırtısı sesi hazırlanıyor")
+                bed = fireplace.ambience_bed()
+            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3", xfade=x,
+                                            bed=bed, bed_volume=vol / 100)
             with self.db.tx() as c:
                 for pos, (ch, st) in enumerate(zip(chosen, starts)):
                     c.execute("INSERT INTO compilation_tracks(video_id, track_id, position, start_sec) "
                               "VALUES (?, ?, ?, ?)", (video_id, ch["id"], pos, st))
-            progress("🖼 Görsel hazırlanıyor")
+            progress("🔥 Şömine arka planı seçiliyor" if self.fireplace_on() else "🖼 Görsel hazırlanıyor")
             self._compilation_visuals(video_id, style, rng, render=False)
             progress("✍️ Başlık, açıklama ve parça listesi yazılıyor")
             self._compilation_meta(video_id, style)
