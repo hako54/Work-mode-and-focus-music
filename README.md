@@ -1,4 +1,15 @@
-# Work Mode & Focus Music — YouTube Otomasyonu
+# Work Mode & Focus Music · Romantic Piano — YouTube Otomasyonu
+
+Aynı kod iki ayrı kanal profiliyle çalışır (`CHANNEL_PROFILE`):
+
+| Profil | Ne üretir |
+|---|---|
+| `focus` (varsayılan) | Günlük 3–5 dk odak müziği + Short, 15 günde bir 30–60 dk derleme |
+| `romantic` | **1 sa 20 dk – 3 sa+** uzunluğunda, sözsüz **romantik piyano** mixleri + Short ([aşağıda](#romantic-piano-kanalı)) |
+
+Her profil ayrı bir Railway servisinde, kendi volume'u ve kendi YouTube kanalıyla çalışır.
+
+## Focus profili
 
 Her gün 3–5 dakikalık bir odak müziği videosu (ve ondan kesilmiş bir Short), her 15 günde bir de en çok dinlenen parçalardan 30–60 dakikalık bir derleme üretir. Her video önce **Telegram'a onaya** gelir. Onay verdiğinizde YouTube'a yüklenir ve belirlenen saatte yayınlanır.
 
@@ -28,6 +39,46 @@ Birbirine yakın 8 "focus / work" stili döngüsel olarak kullanılır. Son 2 g�
 | `acoustic_lofi` | Acoustic Lo-fi | 2 |
 
 Derlemede parçalar en popüler olanla başlar ve enerji seviyesi en yakın parçayla devam eder; böylece geçişler kulağa yumuşak gelir. Yeterli parça yoksa en başarılı stilde derlemeye özel ek parça üretilir.
+
+## Romantic Piano kanalı
+
+```
+09:00  (2 günde bir) Bot romantik piyano stilini seçer → hedef süre seçilir (80–180 dk arası rastgele)
+       → 3–5 dk'lık ~20–40 yeni parça üretilir (ElevenLabs, sözsüz) → 6 sn crossfade ile tek mix
+       → görsel (Stability) → başlık/açıklama + zaman damgalı parça listesi (Claude) → 1080p video + Short
+       → Telegram'a onaya gelir
+Onay → YouTube'a yüklenir, yayın saatinde açılır, "Romantic Piano • Long Mixes" ve stil playlist'ine eklenir
+```
+
+Her mix tek bir stilde kalır (referans videodaki gibi bütünlüklü bir dinleme), parçalar enstrüman, ruh hâli, ton ve tempo bakımından değişir.
+
+| Anahtar | Stil | Enerji |
+|---|---|---|
+| `romantic_solo_piano` | Romantic Solo Piano | 2 |
+| `piano_strings_love` | Piano & Strings Love Theme | 3 |
+| `moonlight_piano` | Moonlight Night Piano | 1 |
+| `piano_cello_romance` | Piano & Cello Romance | 2 |
+| `candlelight_jazz_piano` | Candlelight Jazz Piano | 3 |
+| `wedding_piano` | Wedding & First Dance Piano | 3 |
+| `rainy_romance_piano` | Rainy Romance Piano | 1 |
+| `classical_romance_piano` | Classical Romantic Piano | 2 |
+
+**Ayarlar** (`/ayar`): `mix_min_min=80`, `mix_max_min=180` (ör. hep 3 saat+ için `/ayar mix_min_min 180` ve `/ayar mix_max_min 210`), `mix_every_days=2`, `mix_reuse_pct=25`, `library_keep_days=120`. Parça uzunluğu `daily_min_sec` / `daily_max_sec` (180–300 sn).
+
+**Maliyeti düşüren parça kütüphanesi:**
+- Reddedilen ya da yarıda kalan bir mixin parçaları silinmez. Bir sonraki mix önce bu parçaları kullanır, yani bunlar için yeniden ödeme yapılmaz.
+- Daha önce yayınlanmış parçalar, mixin en fazla `%mix_reuse_pct` kadarını doldurabilir (varsayılan %25). Son 3 mixte geçen parçalar kullanılmaz ve tekrar kullanılan parçalar mixin içine dağıtılır.
+- `library_keep_days`'ten eski parça sesleri her gece 04:00'te silinir; böylece disk dolmaz.
+
+**Maliyet:** Her mix, süresi kadar ElevenLabs müziği tüketir. Örneğin 2 günde bir ortalama 130 dk ve %25 tekrar kullanım ayda yaklaşık 15 × 100 ≈ **1.500 dk** müzik eder. ElevenLabs planınızın aylık müzik dakikasına göre `mix_every_days`, `mix_max_min` ve `mix_reuse_pct` ayarlarını düzenleyin. Bir mixin üretimi parça sayısına göre 20–60 dk sürer.
+
+**Kurulum:** Aşağıdaki adımlar aynıdır. Farklar şunlar:
+- Ayrı bir YouTube kanalı açın, `scripts/youtube_auth.py` ile **o kanal için** ayrı bir refresh token alın. Google Cloud projesi ortak olabilir.
+- Railway'de aynı repodan **ikinci bir servis** ekleyin, ona **ayrı bir volume** (`/data`) bağlayın.
+- Değişkenler: `CHANNEL_PROFILE=romantic`, yeni kanalın `YOUTUBE_REFRESH_TOKEN`'ı ve **ayrı bir Telegram botu** (`TELEGRAM_BOT_TOKEN`; iki servis aynı token ile çalışamaz).
+- 15 dakikadan uzun video yükleyebilmek için kanalın telefonla doğrulanmış olması **şarttır**.
+
+Telegram'da `/uret [stil]` hemen yeni mix üretir, `/kutuphane` ise yeniden kullanılabilir parçaları gösterir. Onay kartında "🎵 Müzik" düğmesi yoktur (mixi reddedip `/uret` deyin; parçalar boşa gitmez).
 
 ## Telegram komutları
 

@@ -1,7 +1,8 @@
-"""Üretim hattı: günlük video + Short, 15 günlük derleme, onay sonrası yükleme."""
+"""Üretim hattı: günlük video + Short, 15 günlük derleme, uzun mix (romantic), onay sonrası yükleme."""
 from __future__ import annotations
 
 import logging
+import math
 import random
 import shutil
 from datetime import datetime, time, timedelta
@@ -9,13 +10,15 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import media, metadata, visuals
+from . import media, metadata, profiles, visuals
 from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
-from .styles import STYLE_BY_KEY, STYLES, Style, build_image_prompt, build_music_prompt, pick_style
+from .styles import STYLE_BY_KEY, Style, active_styles, build_image_prompt, build_music_prompt, pick_style
 
 log = logging.getLogger(__name__)
+MIX_XFADE = 6.0          # uzun mixte parçalar arası crossfade (sn)
+LONG_KINDS = ("compilation", "mix")  # çok parçalı, compilation_tracks kullanan türler
 Progress = Callable[[str], None]
 
 
@@ -40,7 +43,7 @@ class Pipeline:
 
     def style_performance(self) -> dict[str, float]:
         rows = self.db.query(
-            "SELECT style_key, AVG(views) v FROM videos WHERE kind = 'daily' AND status = 'published' "
+            "SELECT style_key, AVG(views) v FROM videos WHERE kind IN ('daily', 'mix') AND status = 'published' "
             "GROUP BY style_key")
         return {r["style_key"]: float(r["v"] or 0) for r in rows}
 
@@ -124,23 +127,35 @@ class Pipeline:
 
     def _make_short(self, parent_id: int) -> int:
         parent = self.db.video(parent_id)
-        t = self.db.track(parent["track_id"])
         for old in self.db.children(parent_id):
             self.db.update_video(old["id"], status="rejected")
-        short_id = self.db.add_video(kind="short", track_id=t["id"], parent_id=parent_id,
+        length = min(59, self.db.get_int("short_seconds"))
+        if parent["track_id"]:
+            t = self.db.track(parent["track_id"])
+            audio, image, track_name = Path(t["audio_path"]), Path(t["image_path"]), t["name"]
+            start = max(0.0, min(t["duration_sec"] * 0.3, t["duration_sec"] - length - 1))
+        else:  # uzun mix: ikinci parçanın (yoksa ilkinin) içinden bir kesit
+            pd = CONFIG.media_dir / f"video_{parent_id}"
+            audio, image = pd / "mix.mp3", pd / "image.png"
+            rows = self.db.query("SELECT ct.start_sec, t.name FROM compilation_tracks ct JOIN tracks t "
+                                 "ON t.id = ct.track_id WHERE ct.video_id = ? ORDER BY ct.position LIMIT 2",
+                                 (parent_id,))
+            pick = rows[-1] if rows else None
+            track_name = pick["name"] if pick else None
+            start = min((pick["start_sec"] if pick else 0.0) + 25.0, max(0.0, media.duration(audio) - length - 1))
+        short_id = self.db.add_video(kind="short", track_id=parent["track_id"], parent_id=parent_id,
                                      style_key=parent["style_key"], status="building")
         d = self._dir(f"video_{short_id}")
-        length = min(59, self.db.get_int("short_seconds"))
-        start = max(0.0, min(t["duration_sec"] * 0.3, t["duration_sec"] - length - 1))
-        seg = media.cut_segment(Path(t["audio_path"]), d / "segment.mp3", start, length)
-        vimg = visuals.vertical_from(Path(t["image_path"]), d / "vertical.png")
+        seg = media.cut_segment(audio, d / "segment.mp3", start, length)
+        vimg = visuals.vertical_from(image, d / "vertical.png")
         loop = media.make_loop(vimg, d / "loop.mp4", size=(1080, 1920))
         out = media.mux(loop, seg, d / "video.mp4")
         for p in (loop, seg):
             p.unlink(missing_ok=True)
-        title = f"{(parent['title'] or 'Focus Music')[:80]} #shorts"
+        title = f"{(parent['title'] or 'Music')[:80]} #shorts"
+        what = "full version" if parent["kind"] == "daily" else f"full {media.fmt_long(media.duration(audio))} mix"
         desc = metadata.full_description(
-            f"{t['name'] or 'Focus track'} — full version on the channel.\n\n{(parent['description'] or '')[:400]}")
+            f"{track_name or 'This track'} — {what} on the channel.\n\n{(parent['description'] or '')[:400]}")
         self.db.update_video(short_id, title=title, description=desc, tags=tags_of(parent),
                              video_path=str(out), status="pending")
         return short_id
@@ -149,11 +164,12 @@ class Pipeline:
     def regenerate(self, video_id: int, part: str, progress: Progress = _noop) -> None:
         """part: music | image | meta"""
         v = self.db.video(video_id)
-        style = STYLE_BY_KEY.get(v["style_key"] or "", STYLES[0])
+        style = STYLE_BY_KEY.get(v["style_key"] or "", active_styles()[0])
         rng = random.Random()
-        if v["kind"] == "compilation":
+        if v["kind"] in LONG_KINDS:
             if part == "music":
-                raise ValueError("Derlemede müzik yenilenmez; reddedip /derleme ile yeniden oluşturun.")
+                raise ValueError("Uzun videoda müzik yenilenmez; reddedip /uret ya da /derleme ile yeniden oluşturun. "
+                                 "Reddedilen mixin parçaları bir sonraki mixte yeniden kullanılır.")
             if part == "image":
                 progress("🖼 Yeni görsel hazırlanıyor")
                 self._compilation_visuals(video_id, style, rng)
@@ -224,7 +240,7 @@ class Pipeline:
 
         if total < min_sec:  # yeterli parça yoksa en başarılı stilde ek "exclusive" parça üret
             perf = self.style_performance()
-            style = STYLE_BY_KEY[max(perf, key=perf.get)] if perf else rng.choice(STYLES)
+            style = STYLE_BY_KEY[max(perf, key=perf.get)] if perf else rng.choice(active_styles())
             while total < min_sec:
                 dur = min(self.db.get_int("daily_max_sec"), int(min_sec - total) + 30)
                 dur = max(dur, self.db.get_int("daily_min_sec"))
@@ -277,8 +293,12 @@ class Pipeline:
 
     def _compilation_meta(self, video_id: int, style: Style) -> None:
         tracklist, total = self._compilation_tracklist(video_id)
-        meta = metadata.generate("compilation", style, total, style.scenes[0], self.recent_titles(),
-                                 extra="This is a curated mix of the channel's most listened recent tracks.")
+        kind = self.db.video(video_id)["kind"]
+        n = tracklist.count("\n") + 1
+        extra = ("This is a curated mix of the channel's most listened recent tracks." if kind == "compilation"
+                 else f"One continuous {media.fmt_long(total)} mix of {n} tender romantic piano pieces, "
+                      "smoothly crossfaded, no ads or interruptions inside the music.")
+        meta = metadata.generate(kind, style, total, style.scenes[0], self.recent_titles(), extra=extra)
         desc = metadata.full_description(meta.description, tracklist)
         self.db.update_video(video_id, title=meta.title, description=desc, tags=meta.tags,
                              thumbnail_text=meta.thumbnail_text)
@@ -290,9 +310,9 @@ class Pipeline:
         v = self.db.video(video_id)
         d = self._dir(f"video_{video_id}")
         _, total = self._compilation_tracklist(video_id)
-        hours = total / 3600
-        sub = f"{round(total / 60)} MIN MIX" if hours < 1 else f"{hours:.1f} HOUR MIX".replace(".0", "")
-        thumb = visuals.make_thumbnail(d / "image.png", d / "thumb.jpg", v["thumbnail_text"] or "FOCUS MIX", sub)
+        style = STYLE_BY_KEY.get(v["style_key"] or "", active_styles()[0])
+        sub = media.fmt_long(total).upper() + (" MIX" if v["kind"] == "compilation" else "")
+        thumb = visuals.make_thumbnail(d / "image.png", d / "thumb.jpg", v["thumbnail_text"] or style.thumb_word, sub)
         self.db.update_video(video_id, thumb_path=str(thumb))
         return thumb
 
@@ -315,6 +335,157 @@ class Pipeline:
         first = self.db.one("SELECT created_at FROM videos WHERE kind = 'daily' AND status IN "
                             "('scheduled', 'published') ORDER BY id LIMIT 1")
         return bool(first) and now - parse_iso(first["created_at"]) >= timedelta(days=every) - timedelta(hours=2)
+
+    # ------------------------------------------------------------------ long mix
+    def mix_due(self, now: datetime | None = None) -> bool:
+        now = now or utcnow()
+        every = self.db.get_int("mix_every_days")
+        last = self.db.one("SELECT created_at FROM videos WHERE kind = 'mix' "
+                           "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 1")
+        return not last or now - parse_iso(last["created_at"]) >= timedelta(days=every) - timedelta(hours=2)
+
+    def library_tracks(self, style_key: str) -> tuple[list[dict], list[dict]]:
+        """Bu stilde sesi duran parçalar: (hiç yayınlanmamış, yayınlanmış ve tekrar kullanılabilir).
+
+        Hiç yayınlanmamışlar (yarıda kalan / reddedilen mixlerden) öncelikli ve sınırsız kullanılır.
+        Yayınlanmışlar az kullanılandan çok kullanılana sıralanır; son 3 mixte geçenler atlanır.
+        """
+        busy: set[int] = set()
+        published: dict[int, list[int]] = {}
+        recent_mixes = {r["id"] for r in self.db.query(
+            "SELECT id FROM videos WHERE kind = 'mix' AND status IN ('scheduled', 'published') "
+            "ORDER BY id DESC LIMIT 3")}
+        recent: set[int] = set()
+        for r in self.db.query("SELECT ct.track_id, v.id vid, v.status, v.views FROM compilation_tracks ct "
+                               "JOIN videos v ON v.id = ct.video_id"):
+            if r["status"] in ("pending", "building", "uploading"):
+                busy.add(r["track_id"])
+            elif r["status"] in ("scheduled", "published"):
+                published.setdefault(r["track_id"], []).append(r["views"])
+                if r["vid"] in recent_mixes:
+                    recent.add(r["track_id"])
+        for r in self.db.query("SELECT track_id, status, views FROM videos WHERE kind = 'daily' "
+                               "AND track_id IS NOT NULL"):
+            if r["status"] in ("pending", "building", "uploading"):
+                busy.add(r["track_id"])
+            elif r["status"] in ("scheduled", "published"):
+                published.setdefault(r["track_id"], []).append(r["views"])
+
+        unused, reusable = [], []
+        for t in self.db.query("SELECT * FROM tracks WHERE style_key = ? AND audio_path IS NOT NULL "
+                               "AND duration_sec IS NOT NULL ORDER BY id", (style_key,)):
+            if t["id"] in busy or not Path(t["audio_path"]).exists():
+                continue
+            item = {"id": t["id"], "style_key": t["style_key"], "name": t["name"], "duration": t["duration_sec"],
+                    "audio_path": t["audio_path"], "score": float(sum(published.get(t["id"], [0]))),
+                    "uses": len(published.get(t["id"], []))}
+            if t["id"] not in published:
+                unused.append(item)
+            elif t["id"] not in recent:
+                reusable.append(item)
+        reusable.sort(key=lambda x: (x["uses"], -x["score"]))
+        return unused, reusable
+
+    def create_mix(self, style_key: str | None = None, progress: Progress = _noop) -> int:
+        """1 sa 20 dk – 3 sa+ uzunluğunda, tek stilde, çok parçalı kesintisiz mix üret."""
+        rng = random.Random()
+        recent = [r["style_key"] for r in self.db.query(
+            "SELECT style_key FROM videos WHERE kind = 'mix' ORDER BY id DESC LIMIT 5")]
+        style = STYLE_BY_KEY[style_key] if style_key else pick_style(
+            recent, self.style_performance(), rng, self.disabled_styles())
+        lo, hi = sorted((self.db.get_int("mix_min_min"), self.db.get_int("mix_max_min")))
+        target = rng.randint(lo, hi) * 60
+        tlo, thi = sorted((self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")))
+        x = MIX_XFADE
+
+        unused, reusable = self.library_tracks(style.key)
+        fresh: list[dict] = []
+        reused: list[dict] = []
+        total = 0.0
+        for t in unused:
+            if total >= target:
+                break
+            fresh.append(t)
+            total += t["duration"] - x
+        cap, used_cap = target * self.db.get_int("mix_reuse_pct") / 100, 0.0
+        for t in reusable:
+            if total >= target:
+                break
+            if used_cap + t["duration"] > cap:
+                continue
+            reused.append(t)
+            used_cap += t["duration"]
+            total += t["duration"] - x
+
+        video_id = self.db.add_video(kind="mix", style_key=style.key, status="building")
+        try:
+            avg = (tlo + thi) / 2 - x
+            est = max(0, math.ceil((target - total) / avg)) if total < target else 0
+            progress(f"💕 {style.label} · hedef {media.fmt_long(target)} · "
+                     f"hazır {len(fresh) + len(reused)} parça, ~{est} yeni parça üretilecek")
+            taken = {t["name"] for t in fresh + reused if t["name"]}
+            n = 0
+            while total < target:
+                need = target - total + x
+                if need <= thi:
+                    dur = max(tlo, math.ceil(need))
+                else:  # son parçaya en az bir tam parça kadar yer bırak
+                    dur = rng.randint(tlo, max(tlo, min(thi, int(need - tlo))))
+                n += 1
+                if n == 1 or n % 5 == 0 or n == est:
+                    progress(f"🎵 Parça {n}/~{max(est, n)} üretiliyor ({media.fmt_long(total)} hazır)")
+                name = metadata.random_track_name(rng, taken)
+                taken.add(name)
+                tid = self.db.add_track(style_key=style.key, prompt=build_music_prompt(style, rng), exclusive=1,
+                                        name=name)
+                self._make_track_audio(tid, dur)
+                t = self.db.track(tid)
+                fresh.append({"id": tid, "style_key": style.key, "name": name, "duration": t["duration_sec"],
+                              "audio_path": t["audio_path"], "score": 0.0, "uses": 0})
+                total += t["duration_sec"] - x
+
+            chosen = spread_in(fresh, reused)
+            progress(f"🎚 {len(chosen)} parça crossfade ile birleştiriliyor ({media.fmt_long(total)})")
+            d = self._dir(f"video_{video_id}")
+            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3", xfade=x)
+            with self.db.tx() as c:
+                for pos, (ch, st) in enumerate(zip(chosen, starts)):
+                    c.execute("INSERT INTO compilation_tracks(video_id, track_id, position, start_sec) "
+                              "VALUES (?, ?, ?, ?)", (video_id, ch["id"], pos, st))
+            progress("🖼 Görsel hazırlanıyor")
+            self._compilation_visuals(video_id, style, rng, render=False)
+            progress("✍️ Başlık, açıklama ve parça listesi yazılıyor")
+            self._compilation_meta(video_id, style)
+            progress("🎬 Uzun video render ediliyor (birkaç dakika sürebilir)")
+            self._compilation_render(video_id)
+            if self.db.get_setting("make_shorts") == "1":
+                progress("📱 Short hazırlanıyor")
+                self._make_short(video_id)
+            self.db.update_video(video_id, status="pending")
+        except Exception as e:
+            self.db.update_video(video_id, status="failed", error=str(e)[:1000])
+            raise
+        return video_id
+
+    def prune_library(self, now: datetime | None = None) -> int:
+        """`library_keep_days`'ten eski parça seslerini sil (disk dolmasın). Silinen parça sayısını döndürür."""
+        raw = self.db.get_setting("library_keep_days")
+        if not raw or int(raw) <= 0:
+            return 0
+        cutoff = iso((now or utcnow()) - timedelta(days=int(raw)))
+        busy = {r["track_id"] for r in self.db.query(
+            "SELECT ct.track_id FROM compilation_tracks ct JOIN videos v ON v.id = ct.video_id "
+            "WHERE v.status IN ('pending', 'building', 'uploading') UNION "
+            "SELECT track_id FROM videos WHERE status IN ('pending', 'building', 'uploading') "
+            "AND track_id IS NOT NULL")}
+        n = 0
+        for t in self.db.query("SELECT id FROM tracks WHERE audio_path IS NOT NULL AND created_at < ?", (cutoff,)):
+            if t["id"] in busy:
+                continue
+            shutil.rmtree(CONFIG.media_dir / f"track_{t['id']}", ignore_errors=True)
+            self.db.update_track(t["id"], audio_path=None, image_path=None)
+            n += 1
+        return n
 
     # ------------------------------------------------------------------ upload
     def approve(self, video_id: int, progress: Progress = _noop) -> list[str]:
@@ -358,18 +529,19 @@ class Pipeline:
         return ids
 
     def _add_to_playlists(self, yt, row, yid: str) -> None:
-        names = {"daily": STYLE_BY_KEY[row["style_key"]].label + " • Focus Music",
-                 "compilation": "Long Focus Mixes (30-60 min)",
-                 "short": None}
-        name = names.get(row["kind"])
-        if not name:
-            return
-        key = f"playlist:{name}"
-        pid = self.db.get_setting(key)
-        if not pid:
-            pid = yt.ensure_playlist(name, f"{name} — {CONFIG.channel_name}")
-            self.db.set_setting(key, pid)
-        yt.add_to_playlist(pid, yid)
+        prof = profiles.current()
+        style_list = STYLE_BY_KEY[row["style_key"]].label + prof.style_playlist_suffix if row["style_key"] else None
+        names = {"daily": [style_list], "compilation": [prof.long_playlist],
+                 "mix": [prof.long_playlist, style_list], "short": []}
+        for name in names.get(row["kind"], []):
+            if not name:
+                continue
+            key = f"playlist:{name}"
+            pid = self.db.get_setting(key)
+            if not pid:
+                pid = yt.ensure_playlist(name, f"{name} — {profiles.channel_name()}")
+                self.db.set_setting(key, pid)
+            yt.add_to_playlist(pid, yid)
 
     def _cleanup_after_upload(self, row) -> None:
         """Yüklenen mp4'leri sil (yer kazanmak için); ses ve görseller derleme için kalır."""
@@ -377,7 +549,7 @@ class Pipeline:
             Path(row["video_path"]).unlink(missing_ok=True)
         if row["kind"] == "short":
             shutil.rmtree(CONFIG.media_dir / f"video_{row['id']}", ignore_errors=True)
-        if row["kind"] == "compilation":
+        if row["kind"] in LONG_KINDS:
             (CONFIG.media_dir / f"video_{row['id']}" / "mix.mp3").unlink(missing_ok=True)
 
     def reject(self, video_id: int) -> None:
@@ -385,6 +557,8 @@ class Pipeline:
             self.db.update_video(row["id"], status="rejected")
             if row["video_path"]:
                 Path(row["video_path"]).unlink(missing_ok=True)
+            if row["kind"] in LONG_KINDS:  # parçalar kütüphanede kalır, büyük mix dosyası silinir
+                (CONFIG.media_dir / f"video_{row['id']}" / "mix.mp3").unlink(missing_ok=True)
 
     # ------------------------------------------------------------------ stats
     def refresh_stats(self) -> int:
@@ -431,3 +605,14 @@ def order_for_flow(tracks: list[dict]) -> list[dict]:
         remaining.remove(nxt)
         order.append(nxt)
     return order
+
+
+def spread_in(base: list[dict], extra: list[dict]) -> list[dict]:
+    """`extra` parçalarını `base` içine eşit aralıklarla yerleştir (tekrar kullanılanlar dağılsın)."""
+    out = list(base)
+    if not extra:
+        return out
+    step = (len(base) + len(extra)) / (len(extra) + 1)
+    for i, e in enumerate(extra, 1):
+        out.insert(min(len(out), round(step * i)), e)
+    return out

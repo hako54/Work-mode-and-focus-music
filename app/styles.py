@@ -1,12 +1,17 @@
-"""Birbirine yakın "odak / çalışma müziği" stilleri ve günlük stil seçimi.
+"""Profil başına müzik stilleri ve stil seçimi.
 
-Her gün bir stil seçilir: son günlerde kullanılanlar atlanır, izlenmesi yüksek
+- focus profili: birbirine yakın "odak / çalışma müziği" stilleri
+- romantic profili: romantik piyano stilleri (sözsüz)
+
+Her üretimde bir stil seçilir: son kullanılanlar atlanır, izlenmesi yüksek
 stillere biraz daha fazla şans verilir (ama keşif payı her zaman kalır).
 """
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+
+from . import profiles
 
 
 @dataclass(frozen=True)
@@ -22,7 +27,7 @@ class Style:
     scenes: tuple[str, ...]    # görsel sahneleri
 
 
-STYLES: tuple[Style, ...] = (
+FOCUS_STYLES: tuple[Style, ...] = (
     Style(
         key="lofi_hiphop",
         label="Lo-fi Hip Hop",
@@ -132,7 +137,125 @@ STYLES: tuple[Style, ...] = (
     ),
 )
 
-STYLE_BY_KEY = {s.key: s for s in STYLES}
+ROMANTIC_STYLES: tuple[Style, ...] = (
+    Style(
+        key="romantic_solo_piano",
+        label="Romantic Solo Piano",
+        thumb_word="ROMANTIC PIANO",
+        base="romantic solo grand piano instrumental with a tender singing melody, rich warm chords and soft pedal",
+        instruments=("warm concert grand piano", "intimate close-miked upright piano", "expressive solo piano with rubato"),
+        moods=("tender and heartfelt", "loving and hopeful", "nostalgic and sweet", "dreamy and devoted"),
+        bpm=(62, 76),
+        energy=2,
+        scenes=("grand piano by a tall window at sunset with rose petals on the keys",
+                "couple silhouettes holding hands on a beach at golden hour, soft waves",
+                "candlelit room with a piano, red roses in a vase and warm fairy lights"),
+    ),
+    Style(
+        key="piano_strings_love",
+        label="Piano & Strings Love Theme",
+        thumb_word="LOVE THEME",
+        base="cinematic romantic love theme with emotional piano lead and lush soft string orchestra",
+        instruments=("piano with warm violin section", "piano with soft orchestral strings and harp",
+                     "piano with gentle string quartet"),
+        moods=("emotional and sweeping", "bittersweet and beautiful", "hopeful and romantic", "touching and warm"),
+        bpm=(64, 80),
+        energy=3,
+        scenes=("couple dancing slowly in a ballroom with chandeliers and golden light",
+                "lovers under an umbrella on a rainy european street at night, warm lamps",
+                "field of flowers at sunset with a couple silhouette in the distance"),
+    ),
+    Style(
+        key="moonlight_piano",
+        label="Moonlight Night Piano",
+        thumb_word="MOONLIGHT LOVE",
+        base="soft nocturne-style romantic piano instrumental for late night, delicate and slow with gentle reverb",
+        instruments=("soft felt piano", "delicate piano with distant warm pad", "quiet piano with light celesta touches"),
+        moods=("peaceful and intimate", "calm and loving", "sleepy and tender", "serene midnight romance"),
+        bpm=(56, 68),
+        energy=1,
+        scenes=("moonlit balcony overlooking a calm sea with two glasses and candles",
+                "night sky full of stars over a quiet lake with a small rowing boat",
+                "bedroom window at night with sheer curtains, moonlight and a single rose"),
+    ),
+    Style(
+        key="piano_cello_romance",
+        label="Piano & Cello Romance",
+        thumb_word="PIANO & CELLO",
+        base="romantic duet instrumental of expressive piano and warm singing cello, intimate and elegant",
+        instruments=("piano and solo cello", "piano with cello and soft viola", "piano with cello and light strings"),
+        moods=("deep and passionate", "elegant and tender", "longing and beautiful"),
+        bpm=(58, 72),
+        energy=2,
+        scenes=("old library with a piano and a cello by the fireplace, warm amber light",
+                "autumn park with golden leaves, a bench and a couple walking away",
+                "vintage paris rooftop at dusk with string lights and a piano"),
+    ),
+    Style(
+        key="candlelight_jazz_piano",
+        label="Candlelight Jazz Piano",
+        thumb_word="CANDLELIGHT",
+        base="romantic slow jazz piano ballad instrumental with soft brushed drums and warm upright bass",
+        instruments=("smooth jazz piano trio", "jazz piano with soft saxophone touches", "piano ballad with brushes and bass"),
+        moods=("smooth and romantic", "cozy date night", "warm and elegant", "sensual and calm"),
+        bpm=(60, 78),
+        energy=3,
+        scenes=("candlelit dinner table for two in a cozy restaurant with city lights outside",
+                "rooftop terrace at night with candles, wine glasses and a city skyline",
+                "cozy jazz lounge with a piano, red velvet and dim warm light"),
+    ),
+    Style(
+        key="wedding_piano",
+        label="Wedding & First Dance Piano",
+        thumb_word="FOREVER LOVE",
+        base="beautiful romantic wedding piano instrumental, uplifting gentle melody with light strings, joyful and pure",
+        instruments=("bright grand piano with soft strings", "piano with gentle harp and glockenspiel",
+                     "piano with warm pad and light strings"),
+        moods=("joyful and pure", "uplifting and devoted", "happy tears", "warm and celebratory but gentle"),
+        bpm=(66, 82),
+        energy=3,
+        scenes=("outdoor wedding arch with white flowers at sunset in a garden",
+                "bride and groom silhouettes in a field of lavender at golden hour",
+                "elegant reception hall with candles, flowers and soft golden light"),
+    ),
+    Style(
+        key="rainy_romance_piano",
+        label="Rainy Romance Piano",
+        thumb_word="RAINY LOVE",
+        base="melancholic romantic piano instrumental blended with soft gentle rain ambience, slow and emotional",
+        instruments=("soft piano with light rain", "felt piano with rain on window", "piano with rain and soft strings"),
+        moods=("melancholic but loving", "cozy and tender", "missing you", "quiet rainy night romance"),
+        bpm=(56, 70),
+        energy=1,
+        scenes=("rain on a window with a love letter, candle and a cup of tea on the sill",
+                "couple sharing an umbrella on a rainy night street with glowing reflections",
+                "cozy cabin during rain with a piano, warm lamp and blankets"),
+    ),
+    Style(
+        key="classical_romance_piano",
+        label="Classical Romantic Piano",
+        thumb_word="CLASSICAL LOVE",
+        base="romantic-era classical style piano instrumental with flowing arpeggios, lyrical melody and expressive rubato",
+        instruments=("concert grand piano with flowing arpeggios", "lyrical piano with soft left-hand waltz",
+                     "expressive piano with gentle chamber strings"),
+        moods=("poetic and passionate", "graceful and tender", "timeless and elegant"),
+        bpm=(60, 84),
+        energy=2,
+        scenes=("baroque palace hall with a grand piano, candles and roses",
+                "venetian canal at sunset with a gondola and warm reflections",
+                "classic garden with a fountain and blooming roses at dusk"),
+    ),
+)
+
+ALL_STYLES: tuple[Style, ...] = FOCUS_STYLES + ROMANTIC_STYLES
+STYLE_BY_KEY = {s.key: s for s in ALL_STYLES}
+
+
+def active_styles() -> tuple[Style, ...]:
+    """Etkin kanal profilinin stilleri."""
+    return ROMANTIC_STYLES if profiles.current().key == "romantic" else FOCUS_STYLES
+
+
 KEYS = ("C major", "D major", "F major", "G major", "A minor", "D minor", "E minor", "Bb major", "Eb major")
 
 
@@ -145,7 +268,8 @@ def pick_style(recent_keys: list[str], avg_views: dict[str, float], rng: random.
     """
     rng = rng or random.Random()
     disabled = disabled or set()
-    pool = [s for s in STYLES if s.key not in disabled] or list(STYLES)
+    styles = active_styles()
+    pool = [s for s in styles if s.key not in disabled] or list(styles)
     blocked = set(recent_keys[:2])
     candidates = [s for s in pool if s.key not in blocked] or pool
 
@@ -165,8 +289,7 @@ def build_music_prompt(style: Style, rng: random.Random | None = None) -> str:
     return (
         f"Instrumental {style.base}. Featuring {rng.choice(style.instruments)}. "
         f"Mood: {rng.choice(style.moods)}. {bpm} BPM, in {rng.choice(KEYS)}. "
-        "Designed as background music for deep work, studying and focus: steady energy, "
-        "no sudden drops or loud changes, smooth loop-friendly arrangement, gentle intro and soft ending. "
+        f"{profiles.current().music_purpose} "
         "No vocals, no lyrics. Clean, warm, professional mix."
     )
 
@@ -175,6 +298,6 @@ def build_image_prompt(style: Style, vertical: bool = False, rng: random.Random 
     rng = rng or random.Random()
     framing = "vertical composition" if vertical else "wide cinematic composition"
     return (
-        f"{rng.choice(style.scenes)}. Cozy lo-fi anime illustration style, soft lighting, rich warm colors, "
-        f"calm atmosphere, highly detailed, {framing}, no text, no letters, no watermark, no people facing camera"
+        f"{rng.choice(style.scenes)}. {profiles.current().image_style}, "
+        f"{framing}, no text, no letters, no watermark, no people facing camera"
     )

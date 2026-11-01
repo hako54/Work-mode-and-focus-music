@@ -114,3 +114,13 @@ def fmt_ts(seconds: float) -> str:
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+
+
+def fmt_long(seconds: float) -> str:
+    """Başlık/küçük resim için okunur süre: '45 Min', '1 Hour 25 Min', '3 Hours'."""
+    total_min = int(seconds // 60)
+    h, m = divmod(total_min, 60)
+    if not h:
+        return f"{total_min} Min"
+    hours = f"{h} Hour" + ("s" if h > 1 else "")
+    return hours if m < 3 else f"{hours} {m} Min"

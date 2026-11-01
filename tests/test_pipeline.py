@@ -11,7 +11,7 @@ from app.config import CONFIG
 from app.db import Database, iso
 from app.metadata import fallback, full_description
 from app.pipeline import Pipeline, order_for_flow
-from app.styles import STYLE_BY_KEY, STYLES, build_music_prompt, pick_style
+from app.styles import FOCUS_STYLES as STYLES, build_music_prompt, pick_style
 
 
 def sine(path: Path, seconds: float, freq: int = 440) -> Path:

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .config import DEFAULT_SETTINGS
+from .profiles import default_settings
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracks (
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS tracks (
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
-    kind TEXT NOT NULL,                    -- daily | short | compilation
+    kind TEXT NOT NULL,                    -- daily | short | compilation | mix
     track_id INTEGER REFERENCES tracks(id),
     parent_id INTEGER REFERENCES videos(id),  -- short -> daily
     style_key TEXT,
@@ -108,7 +108,7 @@ class Database:
         row = self.one("SELECT value FROM settings WHERE key = ?", (key,))
         if row:
             return row["value"]
-        return DEFAULT_SETTINGS.get(key, "")
+        return default_settings().get(key, "")
 
     def get_int(self, key: str) -> int:
         return int(self.get_setting(key))

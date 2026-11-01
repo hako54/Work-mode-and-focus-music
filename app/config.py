@@ -1,7 +1,7 @@
 """Ortam değişkenlerinden okunan sabit ayarlar.
 
 Çalışma anında Telegram'dan değiştirilebilen ayarlar (yayın saati, süreler vb.)
-`app.db` içindeki `settings` tablosunda tutulur; buradaki değerler varsayılandır.
+`app.db` içindeki `settings` tablosunda tutulur; varsayılanları `app.profiles` içindedir.
 """
 from __future__ import annotations
 
@@ -45,7 +45,10 @@ class Config:
     data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", "/data")))
     timezone: str = field(default_factory=lambda: _env("TIMEZONE", "Europe/Istanbul"))
     content_language: str = field(default_factory=lambda: _env("CONTENT_LANGUAGE", "en"))
-    channel_name: str = field(default_factory=lambda: _env("CHANNEL_NAME", "Work Mode & Focus Music"))
+    # Boşsa profilin varsayılan kanal adı kullanılır (bkz. app.profiles.channel_name).
+    channel_name: str = field(default_factory=lambda: _env("CHANNEL_NAME"))
+    # focus | romantic — bkz. app/profiles.py
+    channel_profile: str = field(default_factory=lambda: _env("CHANNEL_PROFILE", "focus").lower())
 
     # true iken YouTube'a hiçbir şey yüklenmez; uçtan uca deneme için.
     dry_run: bool = field(default_factory=lambda: _env_bool("DRY_RUN", False))
@@ -63,37 +66,6 @@ class Config:
         return self.data_dir / "app.log"
 
 
-# Telegram'dan /ayar ile değiştirilebilen ayarlar ve varsayılanları.
-DEFAULT_SETTINGS: dict[str, str] = {
-    "generate_time": "09:00",        # günlük üretim + onaya gönderme (yerel saat)
-    "publish_time": "17:00",         # yayın saati (yerel saat; İstanbul 17:00 = ABD doğu 10:00)
-    "daily_min_sec": "180",
-    "daily_max_sec": "300",
-    "compilation_every_days": "15",
-    "compilation_min_min": "30",
-    "compilation_max_min": "60",
-    "make_shorts": "1",
-    "short_seconds": "45",
-    "short_delay_hours": "5",        # Short, ana videodan kaç saat sonra yayınlansın
-    "reminder_hours": "4",           # onay bekleyen için hatırlatma aralığı
-    "auto_approve_hours": "0",       # 0 = kapalı; >0 ise bu kadar saat cevap yoksa otomatik onay
-    "paused": "0",
-}
-
-SETTING_HELP: dict[str, str] = {
-    "generate_time": "Günlük üretim saati (SS:DD)",
-    "publish_time": "Yayın saati (SS:DD)",
-    "daily_min_sec": "Günlük parça en kısa süre (sn)",
-    "daily_max_sec": "Günlük parça en uzun süre (sn)",
-    "compilation_every_days": "Derleme sıklığı (gün)",
-    "compilation_min_min": "Derleme en kısa süre (dk)",
-    "compilation_max_min": "Derleme en uzun süre (dk)",
-    "make_shorts": "Her parçadan Short üret (1/0)",
-    "short_seconds": "Short uzunluğu (sn, en fazla 60)",
-    "short_delay_hours": "Short yayın gecikmesi (saat)",
-    "reminder_hours": "Onay hatırlatma aralığı (saat)",
-    "auto_approve_hours": "Cevapsız kalırsa otomatik onay (saat, 0=kapalı)",
-    "paused": "Otomasyon duraklatıldı mı (1/0)",
-}
+# Profil bazlı varsayılan ayarlar ve açıklamaları `app.profiles` içindedir.
 
 CONFIG = Config()

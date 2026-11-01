@@ -13,24 +13,36 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, filters
 
-from .config import CONFIG, DEFAULT_SETTINGS, SETTING_HELP
+from . import profiles
+from .config import CONFIG
 from .db import Database, parse_iso, utcnow
 from .media import fmt_ts
-from .pipeline import Pipeline
-from .styles import STYLE_BY_KEY, STYLES
+from .pipeline import LONG_KINDS, Pipeline
+from .profiles import SETTING_HELP, default_settings
+from .styles import STYLE_BY_KEY, active_styles
 
 log = logging.getLogger(__name__)
-KIND_TR = {"daily": "Günlük", "short": "Short", "compilation": "Derleme"}
+KIND_TR = {"daily": "Günlük", "short": "Short", "compilation": "Derleme", "mix": "Uzun Mix"}
 STATUS_TR = {"pending": "⏳ onay bekliyor", "scheduled": "🗓 zamanlandı", "published": "✅ yayında",
              "rejected": "🗑 reddedildi", "failed": "⚠️ hata", "building": "🔧 hazırlanıyor",
              "uploading": "⬆️ yükleniyor"}
 
-HELP = """<b>🎧 Focus Music Otomasyonu</b>
+HELP_PRODUCTION = {
+    "focus": """<b>🎧 Focus Music Otomasyonu</b>
 
 <b>Üretim</b>
 /uret [stil] – şimdi günlük video üret
 /derleme – şimdi uzun derleme üret
-/bekleyenler – onay bekleyenleri tekrar göster
+""",
+    "romantic": """<b>💕 Romantic Piano Otomasyonu</b>
+
+<b>Üretim</b>
+/uret [stil] – şimdi uzun romantik mix üret (1 sa 20 dk – 3 sa+)
+/kutuphane – parça kütüphanesi (yeniden kullanılabilir parçalar)
+""",
+}
+
+HELP_COMMON = """/bekleyenler – onay bekleyenleri tekrar göster
 /onayla &lt;id&gt; · /reddet &lt;id&gt;
 /baslik &lt;id&gt; &lt;yeni başlık&gt; – başlığı elle değiştir
 
@@ -44,6 +56,10 @@ HELP = """<b>🎧 Focus Music Otomasyonu</b>
 /ayar – ayarları göster · /ayar &lt;anahtar&gt; &lt;değer&gt;
 /stiller – stiller ve performansları · /stil &lt;anahtar&gt; ac|kapat
 /duraklat · /devam – otomasyonu durdur / sürdür"""
+
+
+def help_text() -> str:
+    return HELP_PRODUCTION[profiles.current().key] + HELP_COMMON
 
 
 class Bot:
@@ -65,7 +81,7 @@ class Bot:
             "bekleyenler": self.cmd_pending, "onayla": self.cmd_approve, "reddet": self.cmd_reject,
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
-            "duraklat": self.cmd_pause, "devam": self.cmd_resume,
+            "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -81,7 +97,7 @@ class Bot:
         self.loop = asyncio.get_running_loop()
         self._recover()
         self.schedule_jobs()
-        await self.notify("🤖 Bot başladı. " + ("(DRY_RUN: YouTube'a yükleme yapılmayacak)" if CONFIG.dry_run else "")
+        await self.notify(f"🤖 Bot başladı ({profiles.current().key} · {html.escape(profiles.channel_name())}). " + ("(DRY_RUN: YouTube'a yükleme yapılmayacak)" if CONFIG.dry_run else "")
                           + "\n/yardim ile komutları görebilirsiniz.")
 
     def _recover(self) -> None:
@@ -97,8 +113,12 @@ class Bot:
         gh, gm = (int(x) for x in self.db.get_setting("generate_time").split(":"))
         gen = time(gh, gm, tzinfo=self.tz)
         comp = (datetime.combine(datetime.now(self.tz).date(), gen) + timedelta(minutes=30)).timetz()
-        jq.run_daily(self.job_daily, gen, name="daily")
-        jq.run_daily(self.job_compilation, comp, name="compilation")
+        if profiles.current().main_kind == "mix":
+            jq.run_daily(self.job_mix, gen, name="mix")
+            jq.run_daily(self.job_prune, time(4, 0, tzinfo=self.tz), name="prune")
+        else:
+            jq.run_daily(self.job_daily, gen, name="daily")
+            jq.run_daily(self.job_compilation, comp, name="compilation")
         jq.run_repeating(self.job_stats, interval=6 * 3600, first=120, name="stats")
         jq.run_repeating(self.job_reminders, interval=1800, first=300, name="reminders")
         jq.run_daily(self.job_weekly, time(10, 0, tzinfo=self.tz), days=(1,), name="weekly")
@@ -135,7 +155,7 @@ class Bot:
                  InlineKeyboardButton("❌ Reddet", callback_data=f"rj:{vid}")]]
         regen = [InlineKeyboardButton("🖼 Görsel", callback_data=f"ri:{vid}"),
                  InlineKeyboardButton("✏️ Metin", callback_data=f"rt:{vid}")]
-        if kind != "compilation":
+        if kind not in LONG_KINDS:
             regen.insert(0, InlineKeyboardButton("🎵 Müzik", callback_data=f"rm:{vid}"))
         rows.append(regen)
         return InlineKeyboardMarkup(rows)
@@ -166,7 +186,7 @@ class Bot:
                 await self.app.bot.send_message(uid, caption, parse_mode=ParseMode.HTML)
             if v["preview_path"] and Path(v["preview_path"]).exists():
                 with open(v["preview_path"], "rb") as f:
-                    await self.app.bot.send_audio(uid, f, title=v["title"] or "preview", performer=CONFIG.channel_name,
+                    await self.app.bot.send_audio(uid, f, title=v["title"] or "preview", performer=profiles.channel_name(),
                                                   read_timeout=120, write_timeout=120)
             await self.app.bot.send_message(uid, f"#{vid} için karar:", reply_markup=self._keyboard(vid, v["kind"]))
 
@@ -183,6 +203,15 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             log.exception("Günlük üretim hatası")
             await self.notify(f"⚠️ Günlük video üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
+
+    async def do_mix(self, style_key: str | None = None) -> None:
+        try:
+            vid = await self.run_heavy("uzun mix", self.pipe.create_mix, style_key)
+            await self.send_card(vid)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Mix üretim hatası")
+            await self.notify(f"⚠️ Uzun mix üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>\n"
+                              "Üretilen parçalar kütüphanede kaldı; bir sonraki /uret onları kullanır.")
 
     async def do_compilation(self) -> None:
         try:
@@ -251,7 +280,7 @@ class Bot:
             f"{update.effective_user.id}")
 
     async def cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_html(HELP)
+        await update.message.reply_html(help_text())
 
     async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         jobs = sorted((j for j in self.app.job_queue.jobs() if j.next_t), key=lambda j: j.next_t)
@@ -259,22 +288,33 @@ class Bot:
         recent = self.db.query("SELECT * FROM videos WHERE kind != 'short' ORDER BY id DESC LIMIT 6")
         lines = "\n".join(f"#{r['id']} {KIND_TR[r['kind']]} · {STATUS_TR.get(r['status'], r['status'])} · "
                           f"{html.escape((r['title'] or '-')[:40])}" for r in recent)
-        due = "evet" if self.pipe.compilation_due() else "hayır"
+        if profiles.current().main_kind == "mix":
+            due = "Mix zamanı geldi mi: " + ("evet" if self.pipe.mix_due() else "hayır")
+        else:
+            due = "Derleme zamanı geldi mi: " + ("evet" if self.pipe.compilation_due() else "hayır")
         await update.message.reply_html(
             f"<b>Durum</b>: {'⏸ DURAKLATILDI' if self.paused() else '▶️ çalışıyor'}"
             f"{' · DRY_RUN' if CONFIG.dry_run else ''}\n"
-            f"Meşgul: {'evet' if self.busy.locked() else 'hayır'} · Derleme zamanı geldi mi: {due}\n\n"
+            f"Meşgul: {'evet' if self.busy.locked() else 'hayır'} · {due}\n\n"
             f"<b>Sıradaki işler</b>\n{nxt}\n\n<b>Son videolar</b>\n{lines or '-'}")
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         key = ctx.args[0] if ctx.args else None
-        if key and key not in STYLE_BY_KEY:
+        if key and key not in {s.key for s in active_styles()}:
             await update.message.reply_text("Bilinmeyen stil. /stiller ile listeyi görün.")
+            return
+        if profiles.current().main_kind == "mix":
+            await update.message.reply_text("💕 Uzun mix üretimi başladı. Parça sayısına göre 20–60 dk sürebilir; "
+                                            "adımlar buraya gelecek.")
+            asyncio.create_task(self.do_mix(key))
             return
         await update.message.reply_text("🎬 Günlük video üretimi başladı, adımlar buraya gelecek.")
         asyncio.create_task(self.do_generate(key))
 
     async def cmd_compilation(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if profiles.current().main_kind == "mix":
+            await update.message.reply_text("Bu kanalda her video zaten uzun bir mix. /uret kullanın.")
+            return
         await update.message.reply_text("🎚 Derleme üretimi başladı.")
         asyncio.create_task(self.do_compilation())
 
@@ -367,7 +407,7 @@ class Bot:
     async def cmd_settings(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if len(ctx.args) >= 2:
             key, value = ctx.args[0], " ".join(ctx.args[1:])
-            if key not in DEFAULT_SETTINGS:
+            if key not in default_settings():
                 await update.message.reply_text("Bilinmeyen ayar. /ayar ile listeyi görün.")
                 return
             err = validate_setting(key, value)
@@ -380,31 +420,45 @@ class Bot:
             await update.message.reply_text(f"✅ {key} = {value}")
             return
         lines = [f"<code>{k}</code> = <b>{html.escape(self.db.get_setting(k))}</b>\n   {SETTING_HELP[k]}"
-                 for k in DEFAULT_SETTINGS]
+                 for k in default_settings()]
         await update.message.reply_html("<b>Ayarlar</b> (değiştirmek: /ayar anahtar değer)\n\n" + "\n".join(lines))
 
     async def cmd_styles(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         perf = self.pipe.style_performance()
         disabled = self.pipe.disabled_styles()
         counts = {r["style_key"]: r["n"] for r in self.db.query(
-            "SELECT style_key, COUNT(*) n FROM videos WHERE kind = 'daily' AND youtube_id IS NOT NULL "
+            "SELECT style_key, COUNT(*) n FROM videos WHERE kind IN ('daily', 'mix') AND youtube_id IS NOT NULL "
             "GROUP BY style_key")}
         lines = [f"{'🚫' if s.key in disabled else '🎵'} <code>{s.key}</code> – {s.label} · "
-                 f"{counts.get(s.key, 0)} video · ort. 👁 {perf.get(s.key, 0):,.0f}" for s in STYLES]
+                 f"{counts.get(s.key, 0)} video · ort. 👁 {perf.get(s.key, 0):,.0f}" for s in active_styles()]
         await update.message.reply_html("<b>Stiller</b>\n" + "\n".join(lines) +
                                         "\n\nTek seferlik: /uret &lt;anahtar&gt; · Kapat/aç: /stil &lt;anahtar&gt; kapat|ac")
 
     async def cmd_style_toggle(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if len(ctx.args) != 2 or ctx.args[0] not in STYLE_BY_KEY or ctx.args[1] not in ("ac", "kapat"):
+        keys = {s.key for s in active_styles()}
+        if len(ctx.args) != 2 or ctx.args[0] not in keys or ctx.args[1] not in ("ac", "kapat"):
             await update.message.reply_text("Kullanım: /stil <anahtar> ac|kapat")
             return
         disabled = self.pipe.disabled_styles()
         (disabled.add if ctx.args[1] == "kapat" else disabled.discard)(ctx.args[0])
-        if len(disabled) >= len(STYLES):
+        if len(disabled & keys) >= len(keys):
             await update.message.reply_text("En az bir stil açık kalmalı.")
             return
         self.db.set_setting("disabled_styles", ",".join(sorted(disabled)))
         await update.message.reply_text(f"✅ {ctx.args[0]} {'kapatıldı' if ctx.args[1] == 'kapat' else 'açıldı'}")
+
+    async def cmd_library(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        lines = []
+        for s in active_styles():
+            unused, reusable = self.pipe.library_tracks(s.key)
+            if unused or reusable:
+                mins = sum(t["duration"] for t in unused + reusable) / 60
+                lines.append(f"🎹 {s.label}: {len(unused)} yeni · {len(reusable)} tekrar kullanılabilir "
+                             f"(~{mins:.0f} dk)")
+        await update.message.reply_html(
+            "<b>Parça kütüphanesi</b>\n" + ("\n".join(lines) or "Henüz parça yok.") +
+            f"\n\nMix'in en fazla %{self.db.get_setting('mix_reuse_pct')}'i yayınlanmış parçalardan oluşur; "
+            "hiç yayınlanmamış parçalar (reddedilen / yarıda kalan mixlerden) önce kullanılır.")
 
     async def cmd_pause(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         self.db.set_setting("paused", "1")
@@ -424,6 +478,21 @@ class Bot:
             if parse_iso(r["created_at"]).astimezone(self.tz).date() == today:
                 return  # bugün zaten elle üretilmiş
         await self.do_generate()
+
+    async def job_mix(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if self.paused() or not self.pipe.mix_due():
+            return
+        if self.db.one("SELECT id FROM videos WHERE kind = 'mix' AND status IN ('pending', 'building')"):
+            return  # önceki mix hâlâ onay bekliyor
+        await self.do_mix()
+
+    async def job_prune(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            n = await asyncio.to_thread(self.pipe.prune_library)
+            if n:
+                log.info("Kütüphaneden %s eski parça sesi silindi", n)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kütüphane temizliği başarısız: %s", e)
 
     async def job_compilation(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self.paused() or not self.pipe.compilation_due():
@@ -502,6 +571,12 @@ def validate_setting(key: str, value: str) -> str | None:
         return "15–59 sn arası olmalı"
     if key in ("compilation_min_min", "compilation_max_min") and not 10 <= n <= 180:
         return "10–180 dk arası olmalı"
+    if key in ("mix_min_min", "mix_max_min") and not 30 <= n <= 360:
+        return "30–360 dk arası olmalı"
+    if key == "mix_every_days" and not 1 <= n <= 30:
+        return "1–30 gün arası olmalı"
+    if key == "mix_reuse_pct" and not 0 <= n <= 80:
+        return "0–80 arası olmalı"
     if key == "compilation_every_days" and not 1 <= n <= 90:
         return "1–90 gün arası olmalı"
     return None
