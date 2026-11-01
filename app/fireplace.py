@@ -65,6 +65,8 @@ class Background:
 def backgrounds() -> list[Background]:
     """Kullanılabilir arka planlar: kullanıcı videoları varsa yalnızca onlar, yoksa fotoğraflar."""
     videos = sorted(p for p in user_dir().iterdir() if p.suffix.lower() in VIDEO_EXT)
+    if BUNDLED_DIR.exists():  # GitHub'a assets/fireplace/ altına yüklenen videolar
+        videos += sorted(p for p in BUNDLED_DIR.iterdir() if p.suffix.lower() in VIDEO_EXT)
     if videos:
         return [Background("video", p) for p in videos]
     photos = sorted(p for p in user_dir().iterdir() if p.suffix.lower() in IMAGE_EXT)
@@ -117,7 +119,7 @@ def still_frame(bg: Background, out: Path, size: tuple[int, int] = (1920, 1080))
 def loop_for(bg: Background, size: tuple[int, int]) -> Path:
     """Arka plan için (önbellekli) dikişsiz döngü klibi."""
     w, h = size
-    out = cache_dir() / f"loop_{_key(bg.path, w, h, LOOP_CRF)}.mp4"
+    out = cache_dir() / f"loop_{_key(bg.path, w, h, LOOP_CRF, 'flicker-v2')}.mp4"
     if out.exists():
         return out
     tmp = out.with_suffix(".tmp.mp4")
@@ -184,7 +186,6 @@ def animate_fire(image: Path, out: Path, size: tuple[int, int] = (1920, 1080),
     flame = _smoothstep(0.35, 0.8, lum) * _smoothstep(0.05, 0.3, warm)        # parlak sarı-turuncu alev
     ember = _smoothstep(0.25, 0.55, r) * _smoothstep(0.15, 0.45, r - g)       # kırmızı korlar
     flame_soft = _blur(flame, max(4, w / 300))
-    warp_mask = np.clip(_blur(flame, max(10, w / 80)) * 2.5, 0, 1)          # alevlerin çevresi de oynasın
     glow = _blur(img * flame[..., None], max(30, w / 30))                    # odaya vuran sıcak ışık
 
     frames = seconds * media.FPS
@@ -200,16 +201,7 @@ def animate_fire(image: Path, out: Path, size: tuple[int, int] = (1920, 1080),
         for n in range(frames):
             p = 2 * np.pi * n / frames  # 0..2π, döngü boyunca
             # Alevler: yukarı akan dalgalar (y ile faz kayar) -> yükselme hissi
-            dx = (7 * np.sin(ys / (38 * s) + p * 9 + ph[0]) + 4 * np.sin(ys / (17 * s) + xs / (60 * s) + p * 15 + ph[1]))
-            dy = (6 * np.sin(xs / (45 * s) + p * 7 + ph[2]) + 5 * np.sin(ys / (25 * s) + p * 12 + ph[3])) + 4
-            dx = dx * s * warp_mask
-            dy = dy * s * warp_mask
-            sx = np.clip(xs + dx, 0, w - 1.001)
-            sy = np.clip(ys + dy, 0, h - 1.001)
-            x0, y0 = sx.astype(np.int32), sy.astype(np.int32)
-            fx, fy = (sx - x0)[..., None], (sy - y0)[..., None]
-            frame = (img[y0, x0] * (1 - fx) * (1 - fy) + img[y0, x0 + 1] * fx * (1 - fy)
-                     + img[y0 + 1, x0] * (1 - fx) * fy + img[y0 + 1, x0 + 1] * fx * fy)
+            frame = img  # alevler bükülmez (yapay görünüyordu); yalnızca ışık titrer, korlar parlar
 
             flick = (0.5 * np.sin(p * 11 + ph[4]) + 0.3 * np.sin(p * 23 + ph[5]) + 0.2 * np.sin(p * 37 + ph[6]))
             flick2 = (0.6 * np.sin(p * 17 + ph[7]) + 0.4 * np.sin(p * 31 + ph[8]))
