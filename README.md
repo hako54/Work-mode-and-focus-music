@@ -70,7 +70,7 @@ Videoların arka planı, gerçek bir şöminede yanan ateş gibi atlamasız dön
 - **Arka plan:** Bota Telegram'dan bir şömine **videosu** gönderin (10–40 sn yeter, en fazla 20 MB). Bot videonun sonunu başına yumuşakça bindirir; böylece video takılmadan sonsuz döner. Birden fazla video gönderirseniz her mixte farklı biri kullanılır. Hiç video yoksa **fotoğraflar** kullanılır: repodaki `assets/fireplace/fireplace-01.jpg` ve bota gönderdiğiniz fotoğraflar, alevleri dalgalanan, ışığı titreyen ve korları parlayan 12 saniyelik bir döngüye çevrilir.
 - **Çıtırtı sesi:** Gönderdiğiniz videonun kendi sesi varsa o kullanılır (en doğal sonuç). Yoksa ElevenLabs ile bir kez şömine sesi üretilip saklanır. O da olmazsa sentezlenmiş çıtırtı kullanılır. Ses seviyesi `/ayar fire_volume 30` (0 = kapalı) ile ayarlanır.
 - `/arkaplan` arka planları listeler, `/arkaplan sil <ad>` siler. `/ayar fireplace 0` ile şömine yerine yapay zeka sahne görsellerine dönülür.
-- Hazırlanan döngüler `/data/assets/cache` içinde saklanır; her videoda yeniden işlenmez.
+- Hazırlanan döngüler `/data/assets/cache` içinde saklanır; her videoda yeniden işlenmez. Hareketli ateş çok detaylı olduğu için video dosyası büyüktür: 3 saatlik bir mix yaklaşık 2,5 GB olur (yükleme sonrası silinir).
 
 **Ayarlar** (`/ayar`): `mix_min_min=80`, `mix_max_min=180` (ör. hep 3 saat+ için `/ayar mix_min_min 180` ve `/ayar mix_max_min 210`), `mix_every_days=2`, `mix_reuse_pct=25`, `library_keep_days=120`. Parça uzunluğu `daily_min_sec` / `daily_max_sec` (180–300 sn).
 

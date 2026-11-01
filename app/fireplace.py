@@ -35,6 +35,7 @@ BUNDLED_DIR = Path(__file__).resolve().parent.parent / "assets" / "fireplace"
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 FIRE_LOOP_SECONDS = 12
+LOOP_CRF = 27  # ateş çok detaylı; 23'te 3 saatlik video ~4,7 GB olur, 27'de ~2,5 GB
 CRACKLE_SECONDS = 60
 SR = 44100
 
@@ -116,7 +117,7 @@ def still_frame(bg: Background, out: Path, size: tuple[int, int] = (1920, 1080))
 def loop_for(bg: Background, size: tuple[int, int]) -> Path:
     """Arka plan için (önbellekli) dikişsiz döngü klibi."""
     w, h = size
-    out = cache_dir() / f"loop_{_key(bg.path, w, h)}.mp4"
+    out = cache_dir() / f"loop_{_key(bg.path, w, h, LOOP_CRF)}.mp4"
     if out.exists():
         return out
     tmp = out.with_suffix(".tmp.mp4")
@@ -147,7 +148,7 @@ def seamless_video_loop(src: Path, out: Path, size: tuple[int, int], max_seconds
         "[mid][blend]concat=n=2:v=1:a=0[out]"
     )
     media.run(["ffmpeg", "-y", "-i", str(src), "-filter_complex", fc, "-map", "[out]", "-an",
-               "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-g", str(media.FPS * 2),
+               "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(media.FPS * 2),
                "-pix_fmt", "yuv420p", str(out)])
     return out
 
@@ -192,7 +193,7 @@ def animate_fire(image: Path, out: Path, size: tuple[int, int] = (1920, 1080),
     ph = rng.uniform(0, 2 * np.pi, 12)
 
     cmd = ["ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(media.FPS),
-           "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-g", str(media.FPS * 2),
+           "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(media.FPS * 2),
            "-pix_fmt", "yuv420p", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
