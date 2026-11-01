@@ -74,11 +74,11 @@ Her mix tek bir stilde kalır (referans videodaki gibi bütünlüklü bir dinlem
 
 **Kurulum:** Aşağıdaki adımlar aynıdır. Farklar şunlar:
 - Ayrı bir YouTube kanalı açın, `scripts/youtube_auth.py` ile **o kanal için** ayrı bir refresh token alın. Google Cloud projesi ortak olabilir.
-- Railway'de aynı repodan **ikinci bir servis** ekleyin, ona **ayrı bir volume** (`/data`) bağlayın.
+- Railway'de **ayrı bir proje** açın (önerilen; değişkenler, volume, loglar ve fatura karışmaz), aynı GitHub reposundan deploy edin ve servise **ayrı bir volume** (`/data`) bağlayın.
 - Değişkenler: `CHANNEL_PROFILE=romantic`, yeni kanalın `YOUTUBE_REFRESH_TOKEN`'ı ve **ayrı bir Telegram botu** (`TELEGRAM_BOT_TOKEN`; iki servis aynı token ile çalışamaz).
 - 15 dakikadan uzun video yükleyebilmek için kanalın telefonla doğrulanmış olması **şarttır**.
 
-Telegram'da `/uret [stil]` hemen yeni mix üretir, `/kutuphane` ise yeniden kullanılabilir parçaları gösterir. Onay kartında "🎵 Müzik" düğmesi yoktur (mixi reddedip `/uret` deyin; parçalar boşa gitmez).
+Anahtarları girdikten sonra ilk iş `DRY_RUN=1` ile `/demo` yazın: gerçek ElevenLabs müziğiyle 10 dk'lık bir deneme mix'i üretilir ve ses önizlemesi Telegram'a gelir (`/demo 5 moonlight_piano` gibi süre/stil de verilebilir). Telegram'da `/uret [stil]` hemen yeni mix üretir, `/kutuphane` ise yeniden kullanılabilir parçaları gösterir. Onay kartında "🎵 Müzik" düğmesi yoktur (mixi reddedip `/uret` deyin; parçalar boşa gitmez).
 
 ## Telegram komutları
 

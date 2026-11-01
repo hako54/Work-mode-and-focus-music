@@ -38,6 +38,7 @@ HELP_PRODUCTION = {
 
 <b>Üretim</b>
 /uret [stil] – şimdi uzun romantik mix üret (1 sa 20 dk – 3 sa+)
+/demo [dk] [stil] – kısa deneme mix'i (varsayılan 10 dk, düşük maliyet)
 /kutuphane – parça kütüphanesi (yeniden kullanılabilir parçalar)
 """,
 }
@@ -82,6 +83,7 @@ class Bot:
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
+            "demo": self.cmd_demo,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -204,9 +206,11 @@ class Bot:
             log.exception("Günlük üretim hatası")
             await self.notify(f"⚠️ Günlük video üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
 
-    async def do_mix(self, style_key: str | None = None) -> None:
+    async def do_mix(self, style_key: str | None = None, minutes: int | None = None) -> None:
         try:
-            vid = await self.run_heavy("uzun mix", self.pipe.create_mix, style_key)
+            def work(key, progress):
+                return self.pipe.create_mix(key, progress, minutes)
+            vid = await self.run_heavy("deneme mix" if minutes else "uzun mix", work, style_key)
             await self.send_card(vid)
         except Exception as e:  # noqa: BLE001
             log.exception("Mix üretim hatası")
@@ -446,6 +450,21 @@ class Bot:
             return
         self.db.set_setting("disabled_styles", ",".join(sorted(disabled)))
         await update.message.reply_text(f"✅ {ctx.args[0]} {'kapatıldı' if ctx.args[1] == 'kapat' else 'açıldı'}")
+
+    async def cmd_demo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if profiles.current().main_kind != "mix":
+            await update.message.reply_text("/demo yalnızca romantic profilinde var; burada /uret kullanın.")
+            return
+        minutes, key = 10, None
+        for a in ctx.args:
+            if a.isdigit():
+                minutes = max(3, min(30, int(a)))
+            elif a in {s.key for s in active_styles()}:
+                key = a
+        await update.message.reply_text(
+            f"🎧 {minutes} dk'lık deneme mix'i üretiliyor (~{minutes} dk müzik kredisi). Hazır olunca ses önizlemesi "
+            "gelecek. Yayınlamak istemezseniz kartta ❌ Reddet deyin; parçalar bir sonraki mixte kullanılır.")
+        asyncio.create_task(self.do_mix(key, minutes))
 
     async def cmd_library(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lines = []

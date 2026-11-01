@@ -386,15 +386,18 @@ class Pipeline:
         reusable.sort(key=lambda x: (x["uses"], -x["score"]))
         return unused, reusable
 
-    def create_mix(self, style_key: str | None = None, progress: Progress = _noop) -> int:
-        """1 sa 20 dk – 3 sa+ uzunluğunda, tek stilde, çok parçalı kesintisiz mix üret."""
+    def create_mix(self, style_key: str | None = None, progress: Progress = _noop,
+                   minutes: int | None = None) -> int:
+        """1 sa 20 dk – 3 sa+ uzunluğunda, tek stilde, çok parçalı kesintisiz mix üret.
+
+        minutes verilirse hedef süre odur (ör. /demo için 10 dk)."""
         rng = random.Random()
         recent = [r["style_key"] for r in self.db.query(
             "SELECT style_key FROM videos WHERE kind = 'mix' ORDER BY id DESC LIMIT 5")]
         style = STYLE_BY_KEY[style_key] if style_key else pick_style(
             recent, self.style_performance(), rng, self.disabled_styles())
         lo, hi = sorted((self.db.get_int("mix_min_min"), self.db.get_int("mix_max_min")))
-        target = rng.randint(lo, hi) * 60
+        target = (minutes or rng.randint(lo, hi)) * 60
         tlo, thi = sorted((self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")))
         x = MIX_XFADE
 
