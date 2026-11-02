@@ -23,6 +23,16 @@ Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıkl
 | `profile.png` | Customization → Branding → Picture | **800×800** (YouTube önerilen) | Altın kalp, "ER" monogramı ve tuşlar dairesel kırpmanın içinde; 88 px'te bile okunur |
 | `watermark.png` | Customization → Branding → Video watermark | **150×150**, şeffaf | Videonun sağ alt köşesinde ince kalp |
 
+**Banner alternatifleri** (`branding/banner_alternatives/`, hepsi 2560×1440, yazılar güvenli alanda; `_overview.jpg` hepsini mavi güvenli-alan çerçevesiyle gösterir):
+
+| File | Concept |
+|---|---|
+| `banner_A_rose_keys.png` | Burgundy bokeh, ivory piano keys, rose petals (= `banner.png`) |
+| `banner_B_moonlight.png` | Midnight-blue starry sky, crescent moon, warm horizon glow |
+| `banner_C_blush.png` | Light & elegant: cream-blush background, wine-red title, rose petals |
+| `banner_D_candlelight.png` | Dark warm room, glowing candles on both sides |
+| `banner_E_melody.png` | Burgundy bokeh, flowing gold music staff with notes |
+
 Yükleme ekranında YouTube "Adjust/Crop" gösterirse hiçbir şeye dokunmadan **Done** deyin.
 Yeniden üretmek: `python scripts/make_branding.py "Evermore Romance Piano"`
 

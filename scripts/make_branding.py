@@ -255,11 +255,229 @@ def make_watermark() -> Path:
     img.resize((150, 150), Image.LANCZOS).save(out)
     return out
 
+# ----------------------------------------------------------------------------- banner alternatifleri
+TAG = "SOFT ROMANTIC PIANO   ·   1–3+ HOUR MIXES   ·   NEW EVERY 2 DAYS"
+
+
+def _safe(W: int, H: int) -> tuple[int, int, int, int]:
+    return (W // 2 - SAFE_W // 2, H // 2 - SAFE_H // 2, W // 2 + SAFE_W // 2, H // 2 + SAFE_H // 2)
+
+
+def _fit_font(d: ImageDraw.ImageDraw, text: str, path: str, size: int, max_w: int) -> ImageFont.FreeTypeFont:
+    f = ImageFont.truetype(path, size)
+    while d.textlength(text, font=f) > max_w and size > 40:
+        size -= 6
+        f = ImageFont.truetype(path, size)
+    return f
+
+
+def solid_text(img: Image.Image, xy, text: str, f, color, glow_color=None, glow: float = 14) -> Image.Image:
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).text(xy, text, font=f, fill=255)
+    if glow_color:
+        halo = Image.new("RGBA", img.size, (*glow_color, 0))
+        halo.putalpha(mask.filter(ImageFilter.GaussianBlur(glow)).point(lambda v: int(v * 0.6)))
+        img = Image.alpha_composite(img, halo)
+    layer = Image.new("RGBA", img.size, (*color, 0))
+    layer.putalpha(mask)
+    return Image.alpha_composite(img, layer)
+
+
+def title_block(img: Image.Image, name: str, top: int, style: str = "gold", line=GOLD, tag_color=CREAM,
+                size: int = 168, tag: str = TAG) -> Image.Image:
+    """Başlık + kalpli ayraç + alt yazı; hepsi güvenli alanın genişliği içinde ortalanır."""
+    W = img.width
+    d = ImageDraw.Draw(img)
+    f = _fit_font(d, name, SERIF_ITALIC, size, SAFE_W - 120)
+    tw = d.textlength(name, font=f)
+    if style == "gold":
+        img = gold_text(img, ((W - tw) / 2, top), name, f)
+    else:
+        img = solid_text(img, ((W - tw) / 2, top), name, f, style, glow_color=None)
+    d = ImageDraw.Draw(img)
+    ly = top + f.size + 28
+    d.line((W / 2 - 300, ly, W / 2 - 34, ly), fill=(*line, 210), width=3)
+    d.line((W / 2 + 34, ly, W / 2 + 300, ly), fill=(*line, 210), width=3)
+    d.polygon(heart(W / 2, ly + 2, 1.25), fill=(*line, 240))
+    sub = ImageFont.truetype(SANS, 40)
+    d.text(((W - d.textlength(tag, font=sub)) / 2, ly + 28), tag, font=sub, fill=(*tag_color, 240))
+    return img
+
+
+def vertical_gradient(W: int, H: int, stops: list[tuple[float, tuple[int, int, int]]]) -> Image.Image:
+    t = np.linspace(0, 1, H)
+    col = np.zeros((H, 3), np.float32)
+    for (a, ca), (b, cb) in zip(stops, stops[1:]):
+        m = (t >= a) & (t <= b)
+        k = ((t[m] - a) / (b - a))[:, None]
+        col[m] = np.array(ca) + (np.array(cb) - np.array(ca)) * k
+    return Image.fromarray(np.repeat(col[:, None, :], W, axis=1).astype(np.uint8), "RGB")
+
+
+def banner_moonlight(name: str) -> Path:
+    """Gece mavisi gökyüzü, yıldızlar, hilal ve ayın sıcak ışığı."""
+    W, H = 2560, 1440
+    rng = random.Random(8)
+    img = vertical_gradient(W, H, [(0, (6, 8, 26)), (0.5, (22, 22, 60)), (0.75, (58, 26, 58)), (1, (20, 8, 20))])
+    img = img.convert("RGBA")
+    stars = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(stars)
+    for _ in range(900):
+        x, y = rng.randint(0, W), rng.randint(0, H)
+        r = rng.choice([1, 1, 1, 2, 2, 3])
+        a = rng.randint(80, 255)
+        d.ellipse((x - r, y - r, x + r, y + r), fill=(255, 245, 230, a))
+    img = Image.alpha_composite(img, stars.filter(ImageFilter.GaussianBlur(0.6)))
+    sf = _safe(W, H)
+    # hilal: güvenli alanın sağ üst köşesinde
+    mx, my, mr = sf[2] + 60, sf[1] - 110, 80  # yazının dışında, sağ üstte (dekor)
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((mx - mr * 4, my - mr * 4, mx + mr * 4, my + mr * 4), fill=(255, 220, 170, 50))
+    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(90)))
+    moon = Image.new("L", (W, H), 0)
+    md = ImageDraw.Draw(moon)
+    md.ellipse((mx - mr, my - mr, mx + mr, my + mr), fill=255)
+    md.ellipse((mx - mr + 34, my - mr - 14, mx + mr + 34, my + mr - 14), fill=0)
+    layer = Image.new("RGBA", (W, H), (255, 236, 200, 0))
+    layer.putalpha(moon.filter(ImageFilter.GaussianBlur(1.2)))
+    img = Image.alpha_composite(img, layer)
+    # alt kısımda sakin su yansıması gibi yumuşak ışık şeridi
+    band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(band).ellipse((W / 2 - 900, sf[3] - 60, W / 2 + 900, sf[3] + 120), fill=(255, 190, 150, 45))
+    img = Image.alpha_composite(img, band.filter(ImageFilter.GaussianBlur(60)))
+    img = title_block(img, name, sf[1] + 90)
+    out = OUT / "banner_alternatives" / "banner_B_moonlight.png"
+    img.convert("RGB").save(out, optimize=True)
+    return out
+
+
+def banner_blush(name: str) -> Path:
+    """Açık, zarif: krem-pudra zemin, bordo yazı, iki yanda gül yaprakları."""
+    W, H = 2560, 1440
+    rng = random.Random(3)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    r = np.clip(np.hypot((xx - W / 2) / W, (yy - H / 2) / H) * 1.6, 0, 1)[..., None]
+    c0, c1 = np.array((253, 244, 238), np.float32), np.array((236, 200, 200), np.float32)
+    img = Image.fromarray((c0 + (c1 - c0) * r).astype(np.uint8), "RGB").convert("RGBA")
+    img = bokeh(img, rng, 50, (0, 0, W, H), 30, 110, 30)
+    sf = _safe(W, H)
+    wine = (110, 18, 40)
+    img = title_block(img, name, sf[1] + 80, style=wine, line=(184, 134, 70), tag_color=(120, 60, 70), size=140)
+    for (x, y, sz, a) in [(sf[0] - 60, sf[1] + 120, 84, 30), (sf[0] - 10, sf[1] + 230, 58, -30),
+                          (sf[0] - 120, sf[3] - 60, 66, 70), (sf[2] + 60, sf[1] + 110, 80, -20),
+                          (sf[2] + 10, sf[1] + 240, 54, 40), (sf[2] + 120, sf[3] - 50, 68, -60),
+                          (W // 2 - 520, sf[3] - 30, 40, 15), (W // 2 + 540, sf[3] - 34, 38, -15)]:
+        img = paste_petal(img, x, y, sz, a, rng)
+    out = OUT / "banner_alternatives" / "banner_C_blush.png"
+    img.convert("RGB").save(out, optimize=True)
+    return out
+
+
+def candle(h: int) -> Image.Image:
+    """Krem mum + alev + sıcak hale."""
+    w = int(h * 0.32)
+    S = (w * 12, h * 3)  # halenin bulanıklığı tuval kenarında kesilmesin
+    im = Image.new("RGBA", S, (0, 0, 0, 0))
+    cx, base = S[0] // 2, S[1] - 10
+    glow = Image.new("RGBA", S, (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((cx - w * 2.6, base - h - w * 2.6, cx + w * 2.6, base - h + w * 2.2),
+                                 fill=(255, 170, 80, 110))
+    im = Image.alpha_composite(im, glow.filter(ImageFilter.GaussianBlur(w)))
+    d = ImageDraw.Draw(im)
+    body = np.linspace(1.0, 0.7, w)
+    for i, k in enumerate(body):
+        x = cx - w // 2 + i
+        shade = 0.75 + 0.25 * math.sin(math.pi * i / w)
+        d.line((x, base - h, x, base), fill=(int(248 * shade), int(232 * shade), int(206 * shade), 255))
+    d.ellipse((cx - w // 2, base - h - w * 0.12, cx + w // 2, base - h + w * 0.12), fill=(255, 244, 222, 255))
+    d.line((cx, base - h - 2, cx, base - h - w * 0.35), fill=(40, 30, 30, 255), width=3)
+    flame = Image.new("RGBA", S, (0, 0, 0, 0))
+    fd = ImageDraw.Draw(flame)
+    fy = base - h - w * 0.35
+    fd.ellipse((cx - w * 0.18, fy - w * 0.9, cx + w * 0.18, fy + w * 0.05), fill=(255, 190, 90, 230))
+    fd.ellipse((cx - w * 0.09, fy - w * 0.55, cx + w * 0.09, fy), fill=(255, 250, 220, 255))
+    return Image.alpha_composite(im, flame.filter(ImageFilter.GaussianBlur(2.5)))
+
+
+def banner_candle(name: str) -> Path:
+    """Koyu sıcak zemin, iki yanda farklı boylarda mumlar, ortada başlık."""
+    W, H = 2560, 1440
+    rng = random.Random(12)
+    img = gradient_bg(W, H, W / 2, H / 2 + 80).convert("RGBA")
+    img = bokeh(img, rng, 50, (0, 0, W, H), 20, 90, 25)
+    sf = _safe(W, H)
+    for x, ch in [(sf[0] - 60, 300), (sf[0] + 15, 200), (sf[0] - 150, 170),
+                  (sf[2] + 60, 300), (sf[2] - 15, 200), (sf[2] + 150, 170)]:
+        c = candle(ch)
+        img.alpha_composite(c, (x - c.width // 2, sf[3] - c.height + 10))
+    img = title_block(img, name, sf[1] + 70, size=128)
+    for (x, y, sz, a) in [(W // 2 - 380, sf[3] - 30, 46, 20), (W // 2 + 360, sf[3] - 26, 42, -35),
+                          (W // 2 - 40, sf[3] - 18, 34, 60)]:
+        img = paste_petal(img, x, y, sz, a, rng)
+    out = OUT / "banner_alternatives" / "banner_D_candlelight.png"
+    img.convert("RGB").save(out, optimize=True)
+    return out
+
+
+def banner_staff(name: str) -> Path:
+    """Bordo zeminde soldan sağa akan altın porte çizgileri ve süzülen notalar."""
+    W, H = 2560, 1440
+    rng = random.Random(30)
+    img = gradient_bg(W, H, W / 2, H / 2).convert("RGBA")
+    img = bokeh(img, rng, 45, (0, 0, W, H), 30, 110, 30)
+    sf = _safe(W, H)
+    lines = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lines)
+    base_y = sf[3] - 52
+    xs = np.arange(0, W + 1, 8)
+    for k in range(5):
+        pts = [(float(x), base_y + k * 16 + 38 * math.sin(x / 260) + 18 * math.sin(x / 97 + 1.3)) for x in xs]
+        d.line(pts, fill=(*GOLD, 150), width=2)
+    fade = np.clip(1 - np.abs(np.linspace(-1, 1, W)) ** 2.2, 0, 1)
+    a = np.asarray(lines.getchannel("A")).astype(np.float32) * fade[None, :]
+    lines.putalpha(Image.fromarray(a.astype(np.uint8)))
+    img = Image.alpha_composite(img, lines)
+    note_f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 64)
+    d = ImageDraw.Draw(img)
+    for x, sym, sz in [(sf[0] - 120, "♪", 70), (sf[0] + 60, "♫", 62), (W // 2 - 620, "♩", 52),
+                       (W // 2 + 600, "♪", 56), (sf[2] - 60, "♫", 66), (sf[2] + 120, "♪", 72)]:
+        y = base_y + 38 * math.sin(x / 260) + 18 * math.sin(x / 97 + 1.3) - 30
+        f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", sz)
+        img = solid_text(img, (x, y), sym, f, GOLD_LIGHT, glow_color=GOLD, glow=10)
+    img = title_block(img, name, sf[1] + 20, size=150)
+    out = OUT / "banner_alternatives" / "banner_E_melody.png"
+    img.convert("RGB").save(out, optimize=True)
+    return out
+
+
+def contact_sheet(paths: list[Path]) -> Path:
+    """Tüm banner'ları, telefonda görünen güvenli alan çerçevesiyle tek sayfada göster."""
+    tw, th = 1280, 720
+    sheet = Image.new("RGB", (tw * 2 + 60, (th + 90) * ((len(paths) + 1) // 2) + 20), (24, 24, 28))
+    d = ImageDraw.Draw(sheet)
+    lab = ImageFont.truetype(SANS, 34)
+    for i, p in enumerate(paths):
+        im = Image.open(p).convert("RGB").resize((tw, th), Image.LANCZOS)
+        x, y = 20 + (i % 2) * (tw + 20), 20 + (i // 2) * (th + 90)
+        sheet.paste(im, (x, y))
+        sx, sy = SAFE_W / 2560 * tw, SAFE_H / 1440 * th
+        d.rectangle((x + (tw - sx) / 2, y + (th - sy) / 2, x + (tw + sx) / 2, y + (th + sy) / 2),
+                    outline=(120, 220, 255), width=3)
+        d.text((x, y + th + 18), p.stem.replace("banner_", "").replace("_", " "), font=lab, fill=(230, 230, 230))
+    out = OUT / "banner_alternatives" / "_overview.jpg"
+    sheet.save(out, quality=88)
+    return out
+
 
 def main() -> None:
     name = sys.argv[1] if len(sys.argv) > 1 else "Evermore Romance Piano"
     OUT.mkdir(exist_ok=True)
-    for p in (make_banner(name), make_profile(name), make_watermark()):
+    (OUT / "banner_alternatives").mkdir(exist_ok=True)
+    a = make_banner(name)
+    alt_a = OUT / "banner_alternatives" / "banner_A_rose_keys.png"
+    Image.open(a).save(alt_a, optimize=True)
+    alts = [alt_a, banner_moonlight(name), banner_blush(name), banner_candle(name), banner_staff(name)]
+    for p in (*alts, make_profile(name), make_watermark(), contact_sheet(alts)):
         im = Image.open(p)
         print(p.relative_to(ROOT), im.size)
 
