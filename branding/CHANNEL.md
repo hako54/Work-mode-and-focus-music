@@ -15,18 +15,16 @@
 Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıklığı önlemek için başlık ve açıklamalarda
 "original piano" vurgusu korunuyor; Taylor Swift ya da başka sanatçı adlarını etiket olarak asla kullanmayın.
 
-## Images
+## Images (`branding/`) — YouTube ölçülerinde, kırpma gerekmez
 
-Higgsfield hesabınızda üretildi (Higgsfield → Generations bölümünden indirin). İki seçenek var:
+| File | Where | Size | Notes |
+|---|---|---|---|
+| `banner.png` | Customization → Branding → Banner image | **2560×1440** (YouTube önerilen) | Kanal adı, alt yazı ve piyano tuşları tamamen ortadaki **1546×423** güvenli alanda; telefon, tablet, bilgisayar ve TV'de hiçbir şey kesilmez |
+| `profile.png` | Customization → Branding → Picture | **800×800** (YouTube önerilen) | Altın kalp, "ER" monogramı ve tuşlar dairesel kırpmanın içinde; 88 px'te bile okunur |
+| `watermark.png` | Customization → Branding → Video watermark | **150×150**, şeffaf | Videonun sağ alt köşesinde ince kalp |
 
-| Image | Where | Higgsfield job |
-|---|---|---|
-| **Profile A** — two intertwined golden rings on ivory piano keys, rose petals, candlelight | Customization → Branding → Picture | `bd497931-eb51-442e-b892-a929ace9b524` |
-| Profile B — single red rose on ivory piano keys, candlelight | Customization → Branding → Picture | `56fd32a9-c900-4f99-b09c-505998e1c450` |
-| **Banner A** — couple embracing on a moonlit balcony beside a white grand piano, starry sky, candles | Customization → Branding → Banner image | `316668e6-9ee8-4d0d-bbee-4e9cc9791b56` |
-| Banner B — grand piano with roses & candles, couple slow dancing by the window | Customization → Branding → Banner image | `a3b3adaf-af49-458c-80a2-7166d450b54a` |
-
-Banner'ların kenarları telefonda kırpılır; ortadaki sahne her cihazda görünür.
+Yükleme ekranında YouTube "Adjust/Crop" gösterirse hiçbir şeye dokunmadan **Done** deyin.
+Yeniden üretmek: `python scripts/make_branding.py "Evermore Romance Piano"`
 
 ## Channel description (paste as-is, 919 characters; limit 1000)
 
