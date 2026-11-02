@@ -257,6 +257,7 @@ def make_watermark() -> Path:
 
 # ----------------------------------------------------------------------------- banner alternatifleri
 TAG = "SOFT ROMANTIC PIANO   ·   1–3+ HOUR MIXES   ·   NEW EVERY 2 DAYS"
+RELAX_TAG = "SOFT ROMANTIC PIANO   ·   RELAXING   ·   CALM   ·   SWEET DREAMS"
 
 
 def _safe(W: int, H: int) -> tuple[int, int, int, int]:
@@ -345,7 +346,7 @@ def banner_moonlight(name: str) -> Path:
     band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(band).ellipse((W / 2 - 900, sf[3] - 60, W / 2 + 900, sf[3] + 120), fill=(255, 190, 150, 45))
     img = Image.alpha_composite(img, band.filter(ImageFilter.GaussianBlur(60)))
-    img = title_block(img, name, sf[1] + 90)
+    img = title_block(img, name, sf[1] + 90, tag=RELAX_TAG)
     out = OUT / "banner_alternatives" / "banner_B_moonlight.png"
     img.convert("RGB").save(out, optimize=True)
     return out
@@ -477,6 +478,7 @@ def main() -> None:
     alt_a = OUT / "banner_alternatives" / "banner_A_rose_keys.png"
     Image.open(a).save(alt_a, optimize=True)
     alts = [alt_a, banner_moonlight(name), banner_blush(name), banner_candle(name), banner_staff(name)]
+    Image.open(alts[1]).save(OUT / "banner.png", optimize=True)  # seçilen ana banner: B (moonlight)
     for p in (*alts, make_profile(name), make_watermark(), contact_sheet(alts)):
         im = Image.open(p)
         print(p.relative_to(ROOT), im.size)

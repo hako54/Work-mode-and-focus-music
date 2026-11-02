@@ -19,7 +19,7 @@ Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıkl
 
 | File | Where | Size | Notes |
 |---|---|---|---|
-| `banner.png` | Customization → Branding → Banner image | **2560×1440** (YouTube önerilen) | Kanal adı, alt yazı ve piyano tuşları tamamen ortadaki **1546×423** güvenli alanda; telefon, tablet, bilgisayar ve TV'de hiçbir şey kesilmez |
+| `banner.png` | Customization → Branding → Banner image | **2560×1440** (YouTube önerilen) | **Seçilen: B Moonlight.** Kanal adı ve "Soft Romantic Piano · Relaxing · Calm · Sweet Dreams" ortadaki **1546×423** güvenli alanda; her cihazda tam görünür |
 | `profile.png` | Customization → Branding → Picture | **800×800** (YouTube önerilen) | Altın kalp, "ER" monogramı ve tuşlar dairesel kırpmanın içinde; 88 px'te bile okunur |
 | `watermark.png` | Customization → Branding → Video watermark | **150×150**, şeffaf | Videonun sağ alt köşesinde ince kalp |
 
@@ -27,8 +27,8 @@ Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıkl
 
 | File | Concept |
 |---|---|
-| `banner_A_rose_keys.png` | Burgundy bokeh, ivory piano keys, rose petals (= `banner.png`) |
-| `banner_B_moonlight.png` | Midnight-blue starry sky, crescent moon, warm horizon glow |
+| `banner_A_rose_keys.png` | Burgundy bokeh, ivory piano keys, rose petals |
+| `banner_B_moonlight.png` | **Selected** — midnight-blue starry sky, crescent moon, warm horizon glow (= `banner.png`) |
 | `banner_C_blush.png` | Light & elegant: cream-blush background, wine-red title, rose petals |
 | `banner_D_candlelight.png` | Dark warm room, glowing candles on both sides |
 | `banner_E_melody.png` | Burgundy bokeh, flowing gold music staff with notes |
