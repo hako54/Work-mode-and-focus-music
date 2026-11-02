@@ -65,6 +65,7 @@ class Profile:
     long_playlist: str
     style_playlist_suffix: str
     track_words: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+    default_handle: str = ""
     extra_settings: dict[str, str] = field(default_factory=dict)
 
 
@@ -99,7 +100,8 @@ Do not mention specific artists or copyrighted works. Do not add hashtags; they 
 ROMANTIC = Profile(
     key="romantic",
     main_kind="mix",
-    default_channel_name="Evermore Romance",
+    default_channel_name="Evermore Romance Piano",
+    default_handle="EvermoreRomancePiano",
     music_purpose=(
         "Soft romantic relaxation music in the style of spa and massage therapy music, for love, candlelit "
         "evenings, relaxing and sleep: very gentle, warm and mellow tone, slow legato melody mostly in the "
@@ -166,3 +168,12 @@ def default_settings() -> dict[str, str]:
 
 def channel_name() -> str:
     return CONFIG.channel_name or current().default_channel_name
+
+
+def channel_handle() -> str:
+    return (CONFIG.channel_handle or current().default_handle).lstrip("@")
+
+
+def subscribe_url() -> str:
+    h = channel_handle()
+    return f"https://www.youtube.com/@{h}?sub_confirmation=1" if h else ""

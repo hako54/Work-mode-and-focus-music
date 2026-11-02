@@ -47,6 +47,8 @@ class Config:
     content_language: str = field(default_factory=lambda: _env("CONTENT_LANGUAGE", "en"))
     # Boşsa profilin varsayılan kanal adı kullanılır (bkz. app.profiles.channel_name).
     channel_name: str = field(default_factory=lambda: _env("CHANNEL_NAME"))
+    # YouTube kısa adı (@ olmadan da olur); boşsa profilin varsayılanı. Açıklamalara abone linki ekler.
+    channel_handle: str = field(default_factory=lambda: _env("CHANNEL_HANDLE"))
     # focus | romantic — bkz. app/profiles.py
     channel_profile: str = field(default_factory=lambda: _env("CHANNEL_PROFILE", "focus").lower())
 

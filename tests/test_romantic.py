@@ -151,3 +151,9 @@ def test_soft_master_applied_and_crossfade_setting(tmp_path):
     hard = media.master_audio(src, tmp_path / "h.mp3")
     soft = media.master_audio(src, tmp_path / "s.mp3", fade_in=5, fade_out=10, soft=True)
     assert media.duration(soft) == pytest.approx(media.duration(hard), abs=0.2)
+
+
+def test_description_has_subscribe_link():
+    d = full_description("Body")
+    assert "https://www.youtube.com/@EvermoreRomancePiano?sub_confirmation=1" in d
+    assert "Evermore Romance Piano" in d

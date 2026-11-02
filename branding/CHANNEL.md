@@ -1,4 +1,4 @@
-# Evermore Romance — Channel Kit
+# Evermore Romance Piano — Channel Kit
 
 > Kurulum notları Türkçe, YouTube'a girilecek tüm metinler İngilizce.
 > YouTube Studio → **Customization (Özelleştirme)** bölümünde ilgili alanlara kopyalayın.
@@ -7,8 +7,9 @@
 
 | Field | Value |
 |---|---|
-| **Channel name** | Evermore Romance |
-| **Handle** | `@EvermoreRomance` (dolu ise: `@EvermoreRomancePiano`, `@EvermoreRomanceMusic`) |
+| **Channel name** | Evermore Romance Piano |
+| **Handle** | `@EvermoreRomancePiano` |
+| **Channel URL** | https://www.youtube.com/@EvermoreRomancePiano |
 
 "Evermore" = sonsuza dek. Saatlerce süren, hiç bitmeyen romantik piyano mixlerine gönderme yapar.
 Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıklığı önlemek için başlık ve açıklamalarda
@@ -27,10 +28,10 @@ Higgsfield hesabınızda üretildi (Higgsfield → Generations bölümünden ind
 
 Banner'ların kenarları telefonda kırpılır; ortadaki sahne her cihazda görünür.
 
-## Channel description (paste as-is, 907 characters; limit 1000)
+## Channel description (paste as-is, 919 characters; limit 1000)
 
 ```
-Welcome to Evermore Romance — soft, original piano music for a love that lasts forever.
+Welcome to Evermore Romance Piano — soft, original piano music for a love that lasts forever.
 
 Every video is a long, slow, uninterrupted mix (1 to 3+ hours) of tender, gentle piano: warm low tones, smooth transitions and no sudden or sharp sounds. Some mixes are paired with the soft crackle of a fireplace for an even cozier evening.
 
@@ -45,18 +46,22 @@ New long mixes every two days. Subscribe and turn on notifications so your next 
 
 The music and visuals on this channel are created with the help of AI tools and carefully selected and arranged by us. Every mix is original — no copyrighted songs or covers.
 
-Evermore Romance — love, played softly, forever. 🎹🌹
+Evermore Romance Piano — love, played softly, forever. 🎹🌹
 ```
 
 ## Channel keywords (Settings → Channel → Basic info → Keywords)
 
 ```
-romantic piano, love music, relaxing piano, romantic music, instrumental love songs, original piano music, spa music, massage music, sleep music, calm piano, candlelight dinner music, wedding piano, soft piano music, piano for couples, fireplace piano, evermore romance
+romantic piano, love music, relaxing piano, romantic music, instrumental love songs, original piano music, spa music, massage music, sleep music, calm piano, candlelight dinner music, wedding piano, soft piano music, piano for couples, fireplace piano, evermore romance piano, evermore romance
 ```
 
 ## Links (Customization → Basic info → Links)
 
-- Title: `Subscribe` → `https://www.youtube.com/@EvermoreRomance?sub_confirmation=1`
+- Title: `Subscribe` → `https://www.youtube.com/@EvermoreRomancePiano?sub_confirmation=1`
+- Title: `Long Mixes` → `https://www.youtube.com/@EvermoreRomancePiano/videos`
+
+Video açıklamalarına ve sosyal medyaya koymak için abone bağlantısı:
+`https://www.youtube.com/@EvermoreRomancePiano?sub_confirmation=1`
 
 ## Featured video
 
@@ -65,4 +70,6 @@ Kanal sayfasında ilk izlenen video için en çok izlenen 3 saatlik mixi seçin
 
 ## Railway
 
-`CHANNEL_NAME=Evermore Romance` (boş bırakırsanız varsayılan da bu).
+`CHANNEL_NAME=Evermore Romance Piano` ve `CHANNEL_HANDLE=EvermoreRomancePiano` (boş bırakırsanız varsayılan da bunlar).
+Bot her video açıklamasına otomatik olarak şunu ekler:
+`🔔 Subscribe to Evermore Romance Piano: https://www.youtube.com/@EvermoreRomancePiano?sub_confirmation=1`
