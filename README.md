@@ -86,7 +86,7 @@ Videoların arka planı, gerçek bir şöminede yanan ateş gibi atlamasız dön
 **Maliyet:** Her mix, süresi kadar ElevenLabs müziği tüketir. Örneğin 2 günde bir ortalama 130 dk ve %25 tekrar kullanım ayda yaklaşık 15 × 100 ≈ **1.500 dk** müzik eder. ElevenLabs planınızın aylık müzik dakikasına göre `mix_every_days`, `mix_max_min` ve `mix_reuse_pct` ayarlarını düzenleyin. Bir mixin üretimi parça sayısına göre 20–60 dk sürer.
 
 **Kurulum:** Aşağıdaki adımlar aynıdır. Farklar şunlar:
-- Ayrı bir YouTube kanalı açın (ad, profil fotoğrafı, banner ve İngilizce açıklama hazır: `branding/CHANNEL.md`), `scripts/youtube_auth.py` ile **o kanal için** ayrı bir refresh token alın. Google Cloud projesi ortak olabilir.
+- Ayrı bir YouTube kanalı açın (ad, görseller ve İngilizce açıklama: `branding/CHANNEL.md`), `scripts/youtube_auth.py` ile **o kanal için** ayrı bir refresh token alın. Google Cloud projesi ortak olabilir.
 - Railway'de **ayrı bir proje** açın (önerilen; değişkenler, volume, loglar ve fatura karışmaz), aynı GitHub reposundan deploy edin ve servise **ayrı bir volume** (`/data`) bağlayın.
 - Değişkenler: `CHANNEL_PROFILE=romantic`, yeni kanalın `YOUTUBE_REFRESH_TOKEN`'ı ve **ayrı bir Telegram botu** (`TELEGRAM_BOT_TOKEN`; iki servis aynı token ile çalışamaz).
 - 15 dakikadan uzun video yükleyebilmek için kanalın telefonla doğrulanmış olması **şarttır**.

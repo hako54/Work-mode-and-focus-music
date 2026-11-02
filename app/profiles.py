@@ -99,7 +99,7 @@ Do not mention specific artists or copyrighted works. Do not add hashtags; they 
 ROMANTIC = Profile(
     key="romantic",
     main_kind="mix",
-    default_channel_name="Ember & Keys",
+    default_channel_name="Rose & Ivory",
     music_purpose=(
         "Soft romantic relaxation music in the style of spa and massage therapy music, for love, candlelit "
         "evenings, relaxing and sleep: very gentle, warm and mellow tone, slow legato melody mostly in the "
