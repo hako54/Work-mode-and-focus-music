@@ -20,7 +20,7 @@ Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıkl
 | File | Where | Size | Notes |
 |---|---|---|---|
 | `banner.png` | Customization → Branding → Banner image | **2560×1440** (YouTube önerilen) | **Seçilen: B Moonlight.** Kanal adı ve "Soft Romantic Piano · Relaxing · Calm · Sweet Dreams" ortadaki **1546×423** güvenli alanda; her cihazda tam görünür |
-| `profile.png` | Customization → Branding → Picture | **800×800** (YouTube önerilen) | Altın kalp, "ER" monogramı ve tuşlar dairesel kırpmanın içinde; 88 px'te bile okunur |
+| `profile.png` | Customization → Branding → Picture | **800×800** (YouTube önerilen) | Banner ile uyumlu yıldızlı lacivert zemin; altın kalp, "ER" monogramı ve tuşlar dairesel kırpmanın içinde; 88 px'te bile okunur |
 | `watermark.png` | Customization → Branding → Video watermark | **150×150**, şeffaf | Videonun sağ alt köşesinde ince kalp |
 
 **Banner alternatifleri** (`branding/banner_alternatives/`, hepsi 2560×1440, yazılar güvenli alanda; `_overview.jpg` hepsini mavi güvenli-alan çerçevesiyle gösterir):

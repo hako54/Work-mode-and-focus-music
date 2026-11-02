@@ -206,10 +206,21 @@ def make_profile(name: str) -> Path:
     """Küçük boyutta bile okunur amblem: altın kalp + monogram + piyano tuşları, tamamı daire içinde."""
     S = 800
     rng = random.Random(5)
-    img = gradient_bg(S, S, S / 2, S / 2).convert("RGBA")
-    img = bokeh(img, rng, 18, (120, 120, 680, 680), 10, 40, 10)
+    # Banner (B, moonlight) ile aynı palet: gece mavisi, altta hafif mor ufuk, yıldızlar
+    yy, xx = np.mgrid[0:S, 0:S].astype(np.float32)
+    t = (yy / S)[..., None]
+    sky = np.array((10, 12, 38), np.float32) + (np.array((40, 30, 78), np.float32) - (10, 12, 38)) * t ** 1.6
+    vign = np.clip(np.hypot(xx - S / 2, yy - S / 2) / (S * 0.62), 0, 1)[..., None] ** 1.8
+    img = Image.fromarray((sky * (1 - 0.55 * vign)).astype(np.uint8), "RGB").convert("RGBA")
+    stars = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(stars)
+    for _ in range(140):
+        x, y = rng.randint(0, S), rng.randint(0, S)
+        r = rng.choice([1, 1, 1, 2, 2])
+        sd.ellipse((x - r, y - r, x + r, y + r), fill=(255, 245, 230, rng.randint(90, 230)))
+    img = Image.alpha_composite(img, stars.filter(ImageFilter.GaussianBlur(0.5)))
     glow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).ellipse((170, 150, 630, 610), fill=(255, 170, 110, 60))
+    ImageDraw.Draw(glow).ellipse((170, 150, 630, 610), fill=(255, 200, 140, 45))
     img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(80)))
 
     # Altın kalp (kalın, gradyanlı) — dairenin içinde, kenarlarda en az %12 boşluk
