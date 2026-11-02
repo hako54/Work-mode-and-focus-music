@@ -76,7 +76,7 @@ Videoların arka planı, gerçek bir şöminede yanan ateş gibi atlamasız dön
 - `/arkaplan` arka planları listeler, `/arkaplan sil <ad>` siler. `/ayar fireplace 0` ile şömine yerine yapay zeka sahne görsellerine dönülür.
 - Hazırlanan döngüler `/data/assets/cache` içinde saklanır; her videoda yeniden işlenmez. Hareketli ateş çok detaylı olduğu için video dosyası büyüktür: 3 saatlik bir mix yaklaşık 2,5 GB olur (yükleme sonrası silinir).
 
-**Ayarlar** (`/ayar`): `mix_min_min=80`, `mix_max_min=180` (ör. hep 3 saat+ için `/ayar mix_min_min 180` ve `/ayar mix_max_min 210`), `mix_every_days=2`, `mix_reuse_pct=25`, `library_keep_days=120`. Parça uzunluğu `daily_min_sec` / `daily_max_sec` (180–300 sn).
+**Ayarlar** (`/ayar`): `mix_min_min=80`, `mix_max_min=180` (ör. hep 3 saat+ için `/ayar mix_min_min 180` ve `/ayar mix_max_min 210`), `mix_every_days=2`, `mix_reuse_pct=25`, `library_keep_days=14`. Parça uzunluğu `daily_min_sec` / `daily_max_sec` (180–300 sn).
 
 **Maliyeti düşüren parça kütüphanesi:**
 - Reddedilen ya da yarıda kalan bir mixin parçaları silinmez. Bir sonraki mix önce bu parçaları kullanır, yani bunlar için yeniden ödeme yapılmaz.

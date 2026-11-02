@@ -433,6 +433,12 @@ class Pipeline:
         tlo, thi = sorted((self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")))
         x = float(self.db.get_setting("mix_crossfade_sec") or MIX_XFADE)
 
+        try:  # render öncesi disk açılsın (5 GB volume)
+            pruned = self.prune_library()
+            if pruned:
+                log.info("Mix öncesi %s eski parça sesi silindi", pruned)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kütüphane temizliği başarısız: %s", e)
         unused, reusable = self.library_tracks(style.key)
         fresh: list[dict] = []
         reused: list[dict] = []

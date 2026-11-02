@@ -137,7 +137,7 @@ Do not add hashtags; they are appended separately.""",
         "mix_min_min": "80",
         "mix_max_min": "180",
         "mix_reuse_pct": "25",
-        "library_keep_days": "120",
+        "library_keep_days": "14",  # 5 GB volume için: ~7 mixlik parça + 1 render
         "fireplace": "1",
         "fire_volume": "20",
         "soft_master": "1",
