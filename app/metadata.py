@@ -114,8 +114,8 @@ def _fallback_romantic(kind: str, style: Style, duration_sec: float, rng: random
     scene_text = sc.text if sc else ("a warm room by a crackling fireplace" if fire else "a quiet romantic evening")
     bullets = "\n".join(f"• {b}" for b in rng.sample(PERFECT_FOR, 8))
     desc = (
-        f"Soft romantic music and {scene_text} come together to create a warm, intimate atmosphere where you "
-        "can slow down, relax and simply be together.\n\n"
+        f"Soft romantic love music for {scene_text} — a warm, intimate atmosphere where you can slow down, "
+        "relax and simply be together.\n\n"
         f"🍷 Perfect for:\n{bullets}\n\n"
         "Dim the lights, get comfortable and stay a while. 🌙❤️\n\n"
         "🎧 Relax. Breathe. Love.\n\n"
@@ -151,6 +151,21 @@ def _clean(meta: VideoMeta) -> VideoMeta:
             total += len(t) + 1
     return meta.model_copy(update={"title": title, "tags": tags,
                                    "description": meta.description.replace("<", "").replace(">", "")})
+
+
+def shorten(text: str, limit: int) -> str:
+    """Metni kelime ortasından kesmeden kısalt (gerekirse '…' ekle)."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1].rsplit(" ", 1)[0].rstrip(",;:—-– ")
+    return cut + "…"
+
+
+def short_title(parent_title: str, limit: int = 90) -> str:
+    """Short başlığı: ana başlığın '|' öncesi kısmı + #shorts, en fazla 100 karakter, kelime bölünmeden."""
+    head = parent_title.split(" | ")[0].strip() or parent_title.strip()
+    return f"{shorten(head, limit)} #shorts"
 
 
 def full_description(body: str, tracklist: str = "", extra_links: str = "") -> str:

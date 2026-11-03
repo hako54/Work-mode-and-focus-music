@@ -350,3 +350,43 @@ def test_single_scene_video_and_title_format(pipe, monkeypatch):
 
     # both: sahne sonrası sıradaki video kolaja geçer (kolaj yoksa yedeğe)
     assert db.get_setting("last_daily_visual") == "scene"
+
+
+def test_short_title_and_description_are_clean():
+    from app.metadata import shorten, short_title
+    long = "Hold Me a Little Longer 🌙 Romantic Love Music by the Fire | Cozy Autumn Night Ambience"
+    t = short_title(long)
+    assert t == "Hold Me a Little Longer 🌙 Romantic Love Music by the Fire #shorts"
+    assert len(short_title("word " * 40)) <= 100 and not short_title("word " * 40).split()[-2].startswith("wor…")
+    assert shorten("one two three four", 12) == "one two…"
+
+
+def test_short_links_to_full_video_and_follows_meta(pipe, monkeypatch):
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    vid = pipe.create_daily("fireside_love_ballad", theme_key="autumn")
+    short = db.children(vid)[0]
+    assert "#shorts" in short["title"] and " | " not in short["title"]
+    assert pipe.FULL_LINK_TOKEN in short["description"] and "#Shorts" in short["description"]
+    assert "Relaxing after a\n" not in short["description"]
+
+    pipe.regenerate(vid, "meta")
+    parent_head = db.video(vid)["title"].split(" | ")[0]
+    assert db.video(short["id"])["title"].startswith(parent_head)
+
+    class FakeYT:
+        n = 0
+        def upload(self, *a, **k):
+            FakeYT.n += 1
+            return f"yt{FakeYT.n}"
+        def set_thumbnail(self, *a): pass
+        def ensure_playlist(self, *a): return "pl"
+        def add_to_playlist(self, *a): pass
+    import app.pipeline as pl
+    import dataclasses
+    monkeypatch.setattr(pl, "CONFIG", dataclasses.replace(pl.CONFIG, dry_run=False))
+    import app.youtube as ytmod
+    monkeypatch.setattr(ytmod, "YouTube", FakeYT)
+    pipe.approve(vid)
+    desc = db.video(short["id"])["description"]
+    assert "🎧 Full song: https://youtu.be/yt1" in desc and pipe.FULL_LINK_TOKEN not in desc

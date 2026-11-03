@@ -13,7 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import fireplace, profiles
+from . import fireplace, metadata, profiles
 from .config import CONFIG
 from .db import Database, parse_iso, utcnow
 from .media import fmt_ts
@@ -514,7 +514,8 @@ class Bot:
             return
         self.db.update_video(vid, title=title[:100])
         for c in self.db.children(vid):
-            self.db.update_video(c["id"], title=f"{title[:80]} #shorts")
+            if c["status"] == "pending":
+                self.db.update_video(c["id"], title=metadata.short_title(title))
         await update.message.reply_text(f"#{vid} başlığı güncellendi: {title[:100]}")
 
     async def cmd_stats(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:

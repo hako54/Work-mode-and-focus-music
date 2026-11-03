@@ -330,6 +330,7 @@ class Pipeline:
         self.db.update_video(video_id, title=meta.title,
                              description=metadata.full_description(meta.description, extra_links=credits),
                              tags=meta.tags, thumbnail_text=meta.thumbnail_text)
+        self._refresh_short_text(video_id)
 
     def _render_daily(self, video_id: int) -> None:
         v = self.db.video(video_id)
@@ -390,13 +391,33 @@ class Pipeline:
         seg.unlink(missing_ok=True)
         if not bg:
             loop.unlink(missing_ok=True)
-        title = f"{(parent['title'] or 'Music')[:80]} #shorts"
-        what = "full version" if parent["kind"] == "daily" else f"full {media.fmt_long(media.duration(audio))} mix"
-        desc = metadata.full_description(
-            f"{track_name or 'This track'} — {what} on the channel.\n\n{(parent['description'] or '')[:400]}")
-        self.db.update_video(short_id, title=title, description=desc, tags=tags_of(parent),
-                             video_path=str(out), status="pending")
+        length = "" if parent["kind"] == "daily" else media.fmt_long(media.duration(audio))
+        self.db.update_video(short_id, tags=[*tags_of(parent), "shorts"][:30], video_path=str(out), status="pending")
+        self._refresh_short_text(parent_id, track_name=track_name, length=length)
         return short_id
+
+    # Short açıklamasındaki bu satır, yüklemede ana videonun linkiyle değiştirilir.
+    FULL_LINK_TOKEN = "[[FULL_VIDEO_LINK]]"
+
+    def _refresh_short_text(self, parent_id: int, track_name: str | None = None, length: str | None = None) -> None:
+        """Short başlık/açıklamasını ana videodan üret (kelime ortasından kesmeden, tam video linkiyle)."""
+        parent = self.db.video(parent_id)
+        for short in self.db.children(parent_id):
+            if short["status"] != "pending":
+                continue
+            if track_name is None and parent["track_id"]:
+                track_name = self.db.track(parent["track_id"])["name"]
+            if length is None:
+                old = short["description"] or ""
+                length = old.split("🎧 Full ", 1)[1].split(" mix", 1)[0] if " mix: " in old else ""
+            title = metadata.short_title(parent["title"] or "Romantic Love Music")
+            first = (parent["description"] or "").split("\n\n", 1)[0].strip()
+            body = (f"{track_name} — {metadata.shorten(first, 280)}" if track_name else metadata.shorten(first, 300))
+            what = f"🎧 Full {length} mix: " if length else "🎧 Full song: "
+            credits = stock.credits_line() if self._collage(parent_id) else ""
+            desc = metadata.full_description(f"{body}\n\n{what}{self.FULL_LINK_TOKEN}", extra_links=credits)
+            desc = desc.replace(profiles.current().hashtags, "#Shorts " + profiles.current().hashtags)
+            self.db.update_video(short["id"], title=title, description=desc)
 
     # --------------------------------------------------------------- regenerate
     def regenerate(self, video_id: int, part: str, progress: Progress = _noop) -> None:
@@ -585,6 +606,7 @@ class Pipeline:
         desc = metadata.full_description(meta.description, tracklist)
         self.db.update_video(video_id, title=meta.title, description=desc, tags=meta.tags,
                              thumbnail_text=meta.thumbnail_text)
+        self._refresh_short_text(video_id)
         v = self.db.video(video_id)
         if v["video_path"]:  # yalnızca metin değiştiyse küçük resmi güncelle
             self._compilation_thumb(video_id)
@@ -824,10 +846,18 @@ class Pipeline:
             self.db.update_video(row["id"], status="uploading")
             try:
                 progress(f"⬆️ Yükleniyor: {row['title']}")
+                description = row["description"] or ""
+                if self.FULL_LINK_TOKEN in description:  # Short: ana videonun linki (az önce yüklendi)
+                    pid = self.db.video(row["parent_id"])["youtube_id"] if row["parent_id"] else None
+                    if pid and not str(pid).startswith("dryrun"):
+                        description = description.replace(self.FULL_LINK_TOKEN, f"https://youtu.be/{pid}")
+                    else:
+                        description = description.replace(": " + self.FULL_LINK_TOKEN, " on our channel")
+                    self.db.update_video(row["id"], description=description)
                 if yt is None:
                     yid = f"dryrun-{row['id']}"
                 else:
-                    yid = yt.upload(Path(row["video_path"]), row["title"], row["description"], tags_of(row), when)
+                    yid = yt.upload(Path(row["video_path"]), row["title"], description, tags_of(row), when)
                     if row["thumb_path"]:
                         yt.set_thumbnail(yid, Path(row["thumb_path"]))
                     self._add_to_playlists(yt, row, yid)
