@@ -39,6 +39,7 @@ HELP_PRODUCTION = {
 <b>Üretim</b>
 /uret [stil] – şimdi ~5 dk'lık yeni parça videosu üret (+ Short)
 /derleme – şimdi en çok dinlenenlerden uzun derleme üret (kredi harcamaz)
+/parcalar – üretilmiş ama kullanılmamış parçaları dinle, beğendiklerini videoya çevir (kredisiz)
 /mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
 
 <i>Otomatik: 3 günde bir yeni parça, 15 günde bir 80–180 dk derleme.</i>
@@ -91,7 +92,7 @@ class Bot:
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
-            "demo": self.cmd_generate, "mix": self.cmd_demo, "arkaplan": self.cmd_backgrounds,
+            "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -268,6 +269,9 @@ class Bot:
         action, _, raw = (q.data or "").partition(":")
         vid = int(raw)
         await q.answer()
+        if action in ("tv", "td"):  # kütüphane parçası: videoya çevir / sil
+            await self.on_track_button(q, action, vid)
+            return
         try:
             v = self.db.video(vid)
         except KeyError:
@@ -287,6 +291,48 @@ class Bot:
         elif action in ("rm", "ri", "rt"):
             part = {"rm": "music", "ri": "image", "rt": "meta"}[action]
             asyncio.create_task(self.do_regen(vid, part))
+
+    async def on_track_button(self, q, action: str, track_id: int) -> None:
+        if track_id not in {t["id"] for t in self.pipe.unused_tracks()}:
+            await q.edit_message_caption(f"Parça #{track_id} artık kullanılamaz (zaten videoya çevrilmiş ya da silinmiş).")
+            return
+        if action == "td":
+            self.pipe.discard_track(track_id)
+            await q.edit_message_caption(f"🗑 Parça #{track_id} silindi.")
+            return
+        await q.edit_message_caption(f"✅ Parça #{track_id} onaylandı; video hazırlanıyor, kart birazdan gelecek…")
+        asyncio.create_task(self.do_track_video(track_id))
+
+    async def do_track_video(self, track_id: int) -> None:
+        try:
+            vid = await self.run_heavy("parçadan video", self.pipe.create_daily_from_track, track_id)
+            await self.send_card(vid)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Parçadan video hatası")
+            await self.notify(f"⚠️ Parça #{track_id} videoya çevrilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
+
+    async def cmd_tracks(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/parcalar: kullanılmamış parçaları tek tek dinlet; onaylananlar kredisiz videoya çevrilir."""
+        tracks = self.pipe.unused_tracks()
+        if not tracks:
+            await update.message.reply_text("Kütüphanede kullanılmamış parça yok.")
+            return
+        await update.message.reply_text(
+            f"🎧 {len(tracks)} kullanılmamış parça var. Her birini dinleyin:\n"
+            "✅ Video yap → şömineli video + Short hazırlanır, onay kartı gelir (kredi harcamaz)\n"
+            "🗑 Sil → parça kalıcı olarak silinir")
+        for t in tracks[:15]:
+            style = STYLE_BY_KEY.get(t["style_key"])
+            caption = (f"#{t['id']} · {t['name'] or 'Parça'} · {style.label if style else t['style_key']} · "
+                       f"{fmt_ts(t['duration_sec'] or 0)}")
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Video yap", callback_data=f"tv:{t['id']}"),
+                                        InlineKeyboardButton("🗑 Sil", callback_data=f"td:{t['id']}")]])
+            with open(t["audio_path"], "rb") as fh:
+                await update.message.reply_audio(fh, title=t["name"] or f"Track {t['id']}",
+                                                  performer=profiles.channel_name(), caption=caption,
+                                                  reply_markup=kb, read_timeout=120, write_timeout=120)
+        if len(tracks) > 15:
+            await update.message.reply_text(f"…ve {len(tracks) - 15} parça daha. Bunları bitirince tekrar /parcalar.")
 
     # ------------------------------------------------------------------ commands
     async def cmd_whoami(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:

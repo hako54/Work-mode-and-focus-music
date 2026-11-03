@@ -205,3 +205,23 @@ def test_validate_new_settings():
     assert validate_setting("compilation_fill", "x")
     assert validate_setting("daily_every_days", "3") is None
     assert validate_setting("daily_every_days", "30")
+
+
+def test_unused_tracks_become_videos_without_credits(pipe, monkeypatch):
+    db = pipe.db
+    # yarıda kalan bir mixin bıraktığı parça gibi: sesi var, hiçbir videoda yok
+    tid = db.add_track(style_key=ROMANTIC_STYLES[0].key, prompt="p", exclusive=1, name="Moonlit Vow")
+    pipe._make_track_audio(tid, 60)
+    assert [t["id"] for t in pipe.unused_tracks()] == [tid]
+
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: (_ for _ in ()).throw(AssertionError("kredi")))
+    vid = pipe.create_daily_from_track(tid)
+    v = db.video(vid)
+    assert v["status"] == "pending" and v["track_id"] == tid and Path(v["video_path"]).exists()
+    assert pipe.unused_tracks() == []
+
+    tid2 = db.add_track(style_key=ROMANTIC_STYLES[1].key, prompt="p", exclusive=1)
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: FakeMusic())
+    pipe._make_track_audio(tid2, 60)
+    pipe.discard_track(tid2)
+    assert pipe.unused_tracks() == []

@@ -94,6 +94,46 @@ class Pipeline:
             raise
         return video_id
 
+    def unused_tracks(self) -> list:
+        """Sesi duran ama hiçbir videoda yayınlanmamış / onay beklemeyen parçalar (ör. yarıda kalan mixten)."""
+        taken = {r["track_id"] for r in self.db.query(
+            "SELECT track_id FROM videos WHERE track_id IS NOT NULL AND status NOT IN ('rejected', 'failed') "
+            "UNION SELECT ct.track_id FROM compilation_tracks ct JOIN videos v ON v.id = ct.video_id "
+            "WHERE v.status NOT IN ('rejected', 'failed')")}
+        return [t for t in self.db.query("SELECT * FROM tracks WHERE audio_path IS NOT NULL "
+                                         "AND duration_sec IS NOT NULL ORDER BY id")
+                if t["id"] not in taken and Path(t["audio_path"]).exists()]
+
+    def create_daily_from_track(self, track_id: int, progress: Progress = _noop) -> int:
+        """Kütüphanedeki hazır bir parçadan video yap (yeni müzik üretmez, kredi harcamaz)."""
+        rng = random.Random()
+        t = self.db.track(track_id)
+        style = STYLE_BY_KEY.get(t["style_key"], active_styles()[0])
+        video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building")
+        try:
+            if self.fireplace_on():
+                progress("🔥 Şömine arka planı seçiliyor")
+                scene = self._daily_fireplace(video_id, rng)
+            else:
+                progress("🖼 Görsel hazırlanıyor")
+                scene = self._make_track_image(track_id, style, rng)
+            progress("✍️ Başlık ve açıklama yazılıyor")
+            self._write_meta(video_id, style, scene)
+            progress("🎬 Video render ediliyor")
+            self._render_daily(video_id)
+            if self.db.get_setting("make_shorts") == "1":
+                progress("📱 Short hazırlanıyor")
+                self._make_short(video_id)
+            self.db.update_video(video_id, status="pending")
+        except Exception as e:
+            self.db.update_video(video_id, status="failed", error=str(e)[:1000])
+            raise
+        return video_id
+
+    def discard_track(self, track_id: int) -> None:
+        shutil.rmtree(CONFIG.media_dir / f"track_{track_id}", ignore_errors=True)
+        self.db.update_track(track_id, audio_path=None, image_path=None)
+
     def _make_track_audio(self, track_id: int, duration: int) -> None:
         t = self.db.track(track_id)
         d = self._dir(f"track_{track_id}")
