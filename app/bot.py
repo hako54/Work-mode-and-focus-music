@@ -40,6 +40,8 @@ HELP_PRODUCTION = {
 <b>Üretim</b>
 /uret [stil] [tema] – istediğin an yeni ~5 dk parça + Short (ör. /uret sonbahar); takvimi kaydırmaz
 /temalar – temalar (deniz, sonbahar, orman, yağmur, kar…)
+/kullanilan – yayınlanmış parçalar, en çok izlenenden aza (👁 ❤️, derleme sayısı, link)
+/dinle &lt;#no&gt; – bir parçayı tekrar dinle
 /derleme – şimdi en çok dinlenenlerden uzun derleme üret (kredi harcamaz)
 /parcalar – üretilmiş ama kullanılmamış parçaları dinle, beğendiklerini videoya çevir (kredisiz)
 /mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
@@ -95,7 +97,8 @@ class Bot:
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
-            "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes, "arkaplan": self.cmd_backgrounds,
+            "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
+            "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -326,11 +329,73 @@ class Bot:
             log.exception("Parçadan video hatası")
             await self.notify(f"⚠️ Parça #{track_id} videoya çevrilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
 
+    async def cmd_used(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/kullanilan: daha önce videoya dönüşmüş parçalar, en çok izlenenden aza."""
+        if not CONFIG.dry_run:
+            try:
+                await asyncio.to_thread(self.pipe.refresh_stats)
+            except Exception as e:  # noqa: BLE001
+                log.warning("İstatistik güncellenemedi: %s", e)
+        rows = self.pipe.used_tracks()
+        if not rows:
+            await update.message.reply_text("Henüz videoya dönüşmüş parça yok. /parcalar ile kullanılmamışlara bakın.")
+            return
+        from .themes import THEME_BY_KEY
+        total_views = sum(r["views"] or 0 for r in rows)
+        lines = []
+        for n, r in enumerate(rows, 1):
+            th = THEME_BY_KEY.get(r["theme"] or "")
+            style = STYLE_BY_KEY.get(r["style_key"])
+            state = {"pending": "⏳ onay bekliyor", "uploading": "⬆️ yükleniyor"}.get(r["status"])
+            if not state and r["privacy"] == "private":
+                state = "🔒 gizli"
+            head = (f"<b>{n}.</b> 👁 {r['views'] or 0:,} · ❤️ {r['likes'] or 0}"
+                    + (f" · {state}" if state else ""))
+            body = (f"#{r['id']} <b>{html.escape(r['name'] or 'Parça')}</b> ({fmt_ts(r['duration_sec'] or 0)})"
+                    f" · {th.emoji + ' ' + th.label if th else ''} · {html.escape(style.label if style else '')}")
+            extra = []
+            if r["publish_at"]:
+                extra.append(f"📅 {self.local(r['publish_at'])}")
+            if r["compilations"]:
+                extra.append(f"🔁 {r['compilations']} derlemede")
+            if r["youtube_id"] and not str(r["youtube_id"]).startswith("dryrun"):
+                extra.append(f"https://youtu.be/{r['youtube_id']}")
+            lines.append(f"{head}\n{body}\n" + " · ".join(extra))
+        header = (f"<b>Kullanılmış parçalar</b> ({len(rows)} parça · toplam 👁 {total_views:,})\n"
+                  "En çok izlenenden aza. Dinlemek: /dinle &lt;#numara&gt;\n\n")
+        chunk = header
+        for line in lines:  # Telegram mesaj sınırı 4096
+            if len(chunk) + len(line) + 2 > 3900:
+                await update.message.reply_html(chunk, disable_web_page_preview=True)
+                chunk = ""
+            chunk += line + "\n\n"
+        if chunk.strip():
+            await update.message.reply_html(chunk, disable_web_page_preview=True)
+
+    async def cmd_listen(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        tid = self._arg_id(ctx)
+        if tid is None:
+            await update.message.reply_text("Kullanım: /dinle <parça #numarası>")
+            return
+        try:
+            t = self.db.track(tid)
+        except KeyError:
+            await update.message.reply_text(f"Parça #{tid} yok.")
+            return
+        if not t["audio_path"] or not Path(t["audio_path"]).exists():
+            await update.message.reply_text(f"Parça #{tid} ses dosyası artık sunucuda yok.")
+            return
+        with open(t["audio_path"], "rb") as fh:
+            await update.message.reply_audio(fh, title=t["name"] or f"Track {tid}", performer=profiles.channel_name(),
+                                              caption=f"#{tid} · {fmt_ts(t['duration_sec'] or 0)}",
+                                              read_timeout=120, write_timeout=120)
+
     async def cmd_tracks(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """/parcalar: kullanılmamış parçaları tek tek dinlet; onaylananlar kredisiz videoya çevrilir."""
         tracks = self.pipe.unused_tracks()
         if not tracks:
-            await update.message.reply_text("Kütüphanede kullanılmamış parça yok.")
+            await update.message.reply_text("Kütüphanede kullanılmamış parça yok. "
+                                            "Yayınlanmış parçalar için /kullanilan yazın.")
             return
         await update.message.reply_text(
             f"🎧 {len(tracks)} kullanılmamış parça var. Her birini dinleyin:\n"

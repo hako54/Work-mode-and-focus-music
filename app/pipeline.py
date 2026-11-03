@@ -110,6 +110,25 @@ class Pipeline:
                                          "AND duration_sec IS NOT NULL ORDER BY id")
                 if t["id"] not in taken and Path(t["audio_path"]).exists()]
 
+    def used_tracks(self) -> list[dict]:
+        """Yayınlanmış/zamanlanmış ya da onay bekleyen videolarda kullanılan parçalar; en çok izlenen önce."""
+        comp = {r["track_id"]: r["n"] for r in self.db.query(
+            "SELECT ct.track_id, COUNT(DISTINCT ct.video_id) n FROM compilation_tracks ct JOIN videos v "
+            "ON v.id = ct.video_id WHERE v.kind = 'compilation' AND v.status IN ('scheduled', 'published') "
+            "GROUP BY ct.track_id")}
+        out = []
+        for r in self.db.query(
+                "SELECT t.id, t.name, t.style_key, t.theme, t.duration_sec, t.audio_path, v.id vid, v.title, "
+                "v.status, v.views, v.likes, v.youtube_id, v.publish_at, v.privacy FROM tracks t "
+                "JOIN videos v ON v.track_id = t.id AND v.kind = 'daily' "
+                "WHERE v.status IN ('pending', 'uploading', 'scheduled', 'published')"):
+            d = dict(r)
+            d["compilations"] = comp.get(r["id"], 0)
+            out.append(d)
+        out.sort(key=lambda d: (d["status"] not in ("scheduled", "published"), -(d["views"] or 0),
+                                -(d["likes"] or 0), -d["id"]))
+        return out
+
     def create_daily_from_track(self, track_id: int, progress: Progress = _noop) -> int:
         """Kütüphanedeki hazır bir parçadan video yap (yeni müzik üretmez, kredi harcamaz)."""
         rng = random.Random()

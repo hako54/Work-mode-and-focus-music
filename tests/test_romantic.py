@@ -305,3 +305,18 @@ def test_publish_now_skips_schedule(pipe):
     vid = pipe.create_daily(ROMANTIC_STYLES[0].key)
     pipe.approve(vid, publish_now=True)
     assert db.video(vid)["status"] == "published"
+
+
+def test_used_tracks_sorted_by_views(pipe):
+    db = pipe.db
+    ids = []
+    for n, views in enumerate((5, 120, 40)):
+        vid = pipe.create_daily(ROMANTIC_STYLES[n].key)
+        pipe.approve(vid)
+        db.update_video(vid, status="published", views=views, likes=views // 10)
+        ids.append(vid)
+    pending = pipe.create_daily(ROMANTIC_STYLES[3].key)
+    rows = pipe.used_tracks()
+    assert [r["views"] for r in rows[:3]] == [120, 40, 5]
+    assert rows[-1]["vid"] == pending and rows[-1]["status"] == "pending"
+    assert pipe.unused_tracks() == []
