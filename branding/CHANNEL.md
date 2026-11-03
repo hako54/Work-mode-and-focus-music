@@ -36,25 +36,29 @@ Not: "Evermore" aynı zamanda Taylor Swift'in bir albümünün adı. Karışıkl
 Yükleme ekranında YouTube "Adjust/Crop" gösterirse hiçbir şeye dokunmadan **Done** deyin.
 Yeniden üretmek: `python scripts/make_branding.py "Evermore Romance Piano"`
 
-## Channel description (paste as-is, 919 characters; limit 1000)
+## Channel description (paste as-is, 981 characters; limit 1000)
 
 ```
-Welcome to Evermore Romance Piano — soft, original piano music for a love that lasts forever.
+Welcome to Evermore Romance Piano — soft, original love music for the moments you want to last forever. 🌙
 
-Every video is a long, slow, uninterrupted mix (1 to 3+ hours) of tender, gentle piano: warm low tones, smooth transitions and no sudden or sharp sounds. Some mixes are paired with the soft crackle of a fireplace for an even cozier evening.
+Gentle piano, warm strings, tender guitar and mellow saxophone blend into calm, romantic melodies — no sudden or sharp sounds, just warmth and peace.
 
-Made for:
-🌹 Romantic evenings and candlelit dinners
-💆 Massage, spa and self-care sessions
-📖 Reading, journaling and slow mornings
-😴 Falling asleep and deep relaxation
-💕 Date nights, anniversaries and quiet moments together
+On this channel you'll find:
+❤️ Romantic love music for date nights & intimate moments
+🔥 Cozy fireplace & candlelight ambience
+🌧️ Rainy, snowy and starry night romance
+💆 Soft music for massage, spa & relaxation
+😴 Long 1–3 hour mixes for sleep & quiet evenings
 
-New long mixes every two days. Subscribe and turn on notifications so your next romantic evening always has its soundtrack.
+New romantic music every few days, plus a long mix of your favorites every two weeks.
 
-The music and visuals on this channel are created with the help of AI tools and carefully selected and arranged by us. Every mix is original — no copyrighted songs or covers.
+Sharing a quiet evening with someone special or unwinding after a long day — let the music set the mood.
 
-Evermore Romance Piano — love, played softly, forever. 🎹🌹
+The music and visuals are created with the help of AI tools and carefully curated by us. Every piece is original — no covers or copyrighted songs.
+
+🎹 Love, played softly. Forever.
+
+#RomanticMusic #LoveMusic #RomanticPiano #CozyNight #RelaxingMusic #EvermoreRomancePiano
 ```
 
 ## Channel keywords (Settings → Channel → Basic info → Keywords)
