@@ -93,6 +93,9 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
     "rainy_romance_piano": ("rain", "autumn", "winter"),
     "classical_romance_piano": ("autumn", "flowers", "lake"),
     "wedding_piano": ("flowers", "sunset", "seaside"),
+    "fireside_love_ballad": ("autumn", "winter", "forest", "rain"),
+    "romantic_sax_lounge": ("candlelight", "night_sky", "rain"),
+    "acoustic_love_guitar": ("seaside", "sunset", "flowers", "lake"),
 }
 
 
@@ -102,6 +105,49 @@ ALIASES = {"deniz": "seaside", "sahil": "seaside", "plaj": "seaside", "kar": "wi
            "gün": "sunset", "cicek": "flowers", "çiçek": "flowers", "gul": "flowers", "gül": "flowers",
            "gece": "night_sky", "yildiz": "night_sky", "yıldız": "night_sky", "ay": "night_sky", "moon": "night_sky",
            "gol": "lake", "göl": "lake", "mum": "candlelight", "candle": "candlelight"}
+
+
+@dataclass(frozen=True)
+class Scene:
+    queries: tuple[str, ...]   # tek sahneli video için stok video aramaları (önce ilki denenir)
+    title_place: str           # başlıkta: "by the Fire", "on a Rainy Night"
+    ambience: str              # başlıkta: "Cozy Night Ambience"
+    text: str                  # Claude'a verilen sahne tarifi
+
+
+# Tek sahneli videolar: tema başına sıcak, sinematik tek bir mekân.
+SCENES: dict[str, Scene] = {
+    "seaside": Scene(("beach house terrace sunset", "seaside terrace evening", "beach sunset waves"),
+                     "by the Sea", "Seaside Sunset Ambience",
+                     "a quiet seaside terrace at sunset with soft waves and warm lanterns"),
+    "autumn": Scene(("cozy fireplace living room", "autumn cabin fireplace", "fireplace night cozy"),
+                    "by the Fire", "Cozy Autumn Night Ambience",
+                    "a cozy living room by a crackling fireplace on an autumn night, armchair and warm lamps"),
+    "forest": Scene(("forest cabin fireplace", "cabin in the woods night", "cozy cabin interior"),
+                    "in a Forest Cabin", "Cozy Cabin Ambience",
+                    "a warm wooden cabin in the forest at night with a glowing fireplace"),
+    "rain": Scene(("rain window cozy room night", "rain on window night", "rainy night window lamp"),
+                  "on a Rainy Night", "Rainy Night Ambience",
+                  "a cozy room on a rainy night, raindrops on the window and soft lamp light"),
+    "winter": Scene(("cabin fireplace snow window", "snowy night cabin", "winter fireplace cozy"),
+                    "on a Snowy Night", "Winter Cabin Ambience",
+                    "a warm cabin with a fireplace while snow falls softly outside the window"),
+    "sunset": Scene(("sunset terrace wine", "golden hour balcony", "sunset view terrace"),
+                    "at Sunset", "Golden Hour Ambience",
+                    "a balcony at golden hour with two glasses of wine and a warm sunset"),
+    "flowers": Scene(("garden terrace candles evening", "rose garden evening", "romantic garden lights"),
+                     "in the Rose Garden", "Romantic Garden Ambience",
+                     "a rose garden terrace in the evening with candles and string lights"),
+    "night_sky": Scene(("balcony night city lights", "night sky stars timelapse", "moonlight night window"),
+                       "Under the Stars", "Starry Night Ambience",
+                       "a quiet balcony under a starry night sky with soft moonlight"),
+    "lake": Scene(("lake house dock sunset", "lake cabin evening", "calm lake sunset"),
+                  "by the Lake", "Lakeside Evening Ambience",
+                  "a wooden lake house dock at dusk with calm water and soft lights"),
+    "candlelight": Scene(("candlelight dinner romantic", "candles dinner table night", "romantic candles"),
+                         "by Candlelight", "Candlelit Dinner Ambience",
+                         "an intimate candlelit dinner table for two with roses and warm soft light"),
+}
 
 
 def find_theme(text: str) -> Theme | None:

@@ -15,7 +15,7 @@ from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
 from .styles import STYLE_BY_KEY, Style, active_styles, build_image_prompt, build_music_prompt, pick_style
-from .themes import EN_LABEL, THEME_BY_KEY, Theme, pick_theme
+from .themes import EN_LABEL, SCENES, THEME_BY_KEY, Theme, pick_theme
 
 log = logging.getLogger(__name__)
 MIX_XFADE = 6.0          # uzun mixte parçalar arası crossfade (sn)
@@ -67,7 +67,7 @@ class Pipeline:
 
     # ------------------------------------------------------------------ daily
     def create_daily(self, style_key: str | None = None, progress: Progress = _noop,
-                     theme_key: str | None = None, auto: bool = False) -> int:
+                     theme_key: str | None = None, auto: bool = False, visual: str | None = None) -> int:
         rng = random.Random()
         recent = [r["style_key"] for r in self.db.query(
             "SELECT style_key FROM videos WHERE kind = 'daily' ORDER BY id DESC LIMIT 5")]
@@ -86,7 +86,7 @@ class Pipeline:
             progress(f"🎵 Müzik üretiliyor: {style.label}" + (f" · {theme.emoji} {theme.label}" if theme else "")
                      + f" (~{duration // 60} dk {duration % 60} sn)")
             self._make_track_audio(track_id, duration)
-            scene = self._daily_visuals(video_id, style, rng, progress)
+            scene = self._daily_visuals(video_id, style, rng, progress, visual)
             progress("✍️ Başlık ve açıklama yazılıyor")
             self._write_meta(video_id, style, scene)
             progress("🎬 Video render ediliyor")
@@ -192,29 +192,80 @@ class Pipeline:
         p = CONFIG.media_dir / f"video_{video_id}" / ("collage.mp4" if kind == "h" else "collage_v.mp4")
         return p if p.exists() else None
 
-    def _daily_visuals(self, video_id: int, style: Style, rng: random.Random, progress: Progress = _noop) -> str:
-        """Kısa video görüntüsü: temaya uygun klip kolajı → şömine → yapay zeka/prosedürel görsel."""
-        mode = self.db.get_setting("daily_visual") or ("fireplace" if self.fireplace_on() else "image")
+    def _daily_visuals(self, video_id: int, style: Style, rng: random.Random, progress: Progress = _noop,
+                       visual: str | None = None) -> str:
+        """Kısa video görüntüsü: tek sahne / temalı klip kolajı → şömine → yapay zeka/prosedürel görsel.
+
+        daily_visual = both: sırayla bir tek sahne, bir kolaj."""
+        mode = visual or self.db.get_setting("daily_visual") or ("fireplace" if self.fireplace_on() else "image")
+        if mode == "both":
+            mode = "collage" if self.db.get_setting("last_daily_visual") == "scene" else "scene"
         d = self._dir(f"video_{video_id}")
-        for f in ("collage.mp4", "collage_v.mp4", "background.txt"):
+        for f in ("collage.mp4", "collage_v.mp4", "background.txt", "visual.txt"):
             (d / f).unlink(missing_ok=True)
         theme = self._theme_of(video_id)
+        if mode == "scene" and theme and stock.available():
+            progress(f"🎬 {theme.emoji} Tek sahne hazırlanıyor: {SCENES[theme.key].text[:60]}…")
+            try:
+                if self._build_scene(video_id, theme, rng):
+                    self.db.set_setting("last_daily_visual", "scene")
+                    return SCENES[theme.key].text
+            except Exception as e:  # noqa: BLE001
+                log.warning("Tek sahne hazırlanamadı, kolaja geçiliyor: %s", str(e)[-600:])
+            for f in ("collage.mp4", "collage_v.mp4", "visual.txt"):
+                (d / f).unlink(missing_ok=True)
+            mode = "collage"
         if mode == "collage" and theme and stock.available():
             progress(f"🎞 {theme.emoji} {theme.label} temalı klipler hazırlanıyor")
             try:
                 if self._build_collage(video_id, theme, rng):
+                    self.db.set_setting("last_daily_visual", "collage")
                     return theme.scene
             except Exception as e:  # noqa: BLE001
                 log.warning("Kolaj hazırlanamadı, yedeğe geçiliyor: %s", str(e)[-600:])
             for f in ("collage.mp4", "collage_v.mp4"):  # yarım kalan kolaj render'ı bozmasın
                 (d / f).unlink(missing_ok=True)
-        if mode in ("collage", "fireplace") and self.fireplace_on():
+        if mode in ("collage", "scene", "fireplace") and self.fireplace_on():
             progress("🔥 Şömine arka planı seçiliyor")
             self._daily_fireplace(video_id, rng)
             return theme.scene if theme else self.FIRE_SCENE
         progress("🖼 Görsel hazırlanıyor")
         scene = self._make_track_image(self.db.video(video_id)["track_id"], style, rng)
         return theme.scene if theme else scene
+
+    def _build_scene(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
+        """Tek, sinematik bir sahne (ör. şömineli oda) — atlamasız döngü; yoksa tek fotoğraf + yavaş yakınlaşma."""
+        d = self._dir(f"video_{video_id}")
+        used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}
+        item = stock.fetch_scene(SCENES[theme.key].queries, d / "stock", used, rng)
+        try:
+            if not item:
+                return False
+            shorts = self.db.get_setting("make_shorts") == "1"
+            if item.kind == "video":
+                fireplace.seamless_video_loop(item.path, d / "collage.mp4", (1920, 1080), max_seconds=30, xfade=2.0)
+                if shorts:
+                    fireplace.seamless_video_loop(item.path, d / "collage_v.mp4", (1080, 1920), max_seconds=30,
+                                                  xfade=2.0)
+            else:
+                media.make_loop(item.path, d / "collage.mp4")
+                if shorts:
+                    vimg = visuals.vertical_from(item.path, d / "vertical.png")
+                    media.make_loop(vimg, d / "collage_v.mp4", size=(1080, 1920))
+            v = self.db.video(video_id)
+            still = self._dir(f"track_{v['track_id']}") / "image.png"
+            if item.kind == "photo":
+                fireplace.cover(item.path, (1920, 1080)).save(still)
+            else:
+                fireplace.still_frame(fireplace.Background("video", item.path), still)
+            self.db.update_track(v["track_id"], image_path=str(still))
+            (d / "visual.txt").write_text("scene")
+            with self.db.tx() as c:
+                c.execute("INSERT OR IGNORE INTO stock_used(provider_id, theme, used_at) VALUES (?, ?, ?)",
+                          (item.provider_id, theme.key, iso(utcnow())))
+            return True
+        finally:
+            shutil.rmtree(d / "stock", ignore_errors=True)
 
     def _build_collage(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
         d = self._dir(f"video_{video_id}")
@@ -272,7 +323,8 @@ class Pipeline:
         theme = THEME_BY_KEY.get(t["theme"] or "")
         meta = metadata.generate("daily", style, t["duration_sec"], scene, self.recent_titles(),
                                  extra=(f"Theme of this track: {EN_LABEL[theme.key]}." if theme else ""),
-                                 theme_label=EN_LABEL[theme.key] if theme else "")
+                                 theme_label=EN_LABEL[theme.key] if theme else "",
+                                 theme_key=theme.key if theme else "")
         self.db.update_track(t["id"], name=meta.track_name)
         credits = stock.credits_line() if self._collage(video_id) else ""
         self.db.update_video(video_id, title=meta.title,

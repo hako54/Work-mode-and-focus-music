@@ -38,7 +38,7 @@ HELP_PRODUCTION = {
     "romantic": """<b>💕 Romantic Piano Otomasyonu</b>
 
 <b>Üretim</b>
-/uret [stil] [tema] – istediğin an yeni ~5 dk parça + Short (ör. /uret sonbahar); takvimi kaydırmaz
+/uret [stil] [tema] [sahne|kolaj] – istediğin an yeni ~5 dk parça + Short (ör. /uret sonbahar sahne); takvimi kaydırmaz
 /temalar – temalar (deniz, sonbahar, orman, yağmur, kar…)
 /kullanilan – yayınlanmış parçalar, en çok izlenenden aza (👁 ❤️, derleme sayısı, link)
 /dinle &lt;#no&gt; – bir parçayı tekrar dinle
@@ -220,10 +220,10 @@ class Bot:
 
     # ------------------------------------------------------------------ actions
     async def do_generate(self, style_key: str | None = None, theme_key: str | None = None,
-                          auto: bool = False) -> None:
+                          auto: bool = False, visual: str | None = None) -> None:
         try:
             def work(key, progress):
-                return self.pipe.create_daily(key, progress, theme_key=theme_key, auto=auto)
+                return self.pipe.create_daily(key, progress, theme_key=theme_key, auto=auto, visual=visual)
             vid = await self.run_heavy("günlük video", work, style_key)
             await self.send_card(vid)
         except Exception as e:  # noqa: BLE001
@@ -440,9 +440,13 @@ class Bot:
             f"<b>Sıradaki işler</b>\n{nxt}\n\n<b>Son videolar</b>\n{lines or '-'}")
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        key, theme = None, None
-        for a in ctx.args:  # /uret [stil] [tema] — sıra fark etmez
-            if a in {s.key for s in active_styles()}:
+        key, theme, visual = None, None, None
+        modes = {"sahne": "scene", "scene": "scene", "kolaj": "collage", "collage": "collage",
+                 "somine": "fireplace", "şömine": "fireplace"}
+        for a in ctx.args:  # /uret [stil] [tema] [sahne|kolaj] — sıra fark etmez
+            if a.lower() in modes:
+                visual = modes[a.lower()]
+            elif a in {s.key for s in active_styles()}:
                 key = a
             elif find_theme(a):
                 theme = find_theme(a)
@@ -457,7 +461,7 @@ class Bot:
         await update.message.reply_text(
             "🎬 Yeni parça üretimi başladı" + (f" ({theme.emoji} {theme.label})" if theme else "") +
             ", adımlar buraya gelecek. Bu ekstra video otomatik takvimi değiştirmez.")
-        asyncio.create_task(self.do_generate(key, theme.key if theme else None))
+        asyncio.create_task(self.do_generate(key, theme.key if theme else None, visual=visual))
 
     async def cmd_themes(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lines = [f"{t.emoji} <code>{t.key}</code> – {t.label} ({EN_LABEL[t.key]})" for t in THEMES]
@@ -553,7 +557,7 @@ class Bot:
                 lines.append(f"⚠️ ElevenLabs: anahtar var ama kredi okunamadı ({html.escape(str(e)[:150])})")
         else:
             lines.append("❌ ElevenLabs (müzik) – zorunlu")
-        if self.db.get_setting("daily_visual") == "collage":
+        if self.db.get_setting("daily_visual") in ("collage", "scene", "both"):
             lines.append(("✅ Pexels (temalı klip kolajı)" if CONFIG.pexels_api_key else
                           "❌ Pexels – PEXELS_API_KEY yok; kısa videolarda şömineye geçilir"))
         if fire:
@@ -788,7 +792,8 @@ def validate_setting(key: str, value: str) -> str | None:
     if key == "compilation_fill":
         return None if value in ("repeat", "generate") else "repeat ya da generate olmalı"
     if key == "daily_visual":
-        return None if value in ("collage", "fireplace", "image") else "collage, fireplace ya da image olmalı"
+        ok = ("both", "scene", "collage", "fireplace", "image")
+        return None if value in ok else "both, scene, collage, fireplace ya da image olmalı"
     if key.endswith("_time"):
         try:
             hh, mm = (int(x) for x in value.split(":"))

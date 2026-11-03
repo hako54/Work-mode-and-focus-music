@@ -88,7 +88,7 @@ def test_mix_with_fireplace_and_crackle(tmp_path, monkeypatch):
     vid = pipe.create_mix(ROMANTIC_STYLES[0].key)
     v = db.video(vid)
     assert pipe._background(vid) is not None
-    assert "Fireplace" in v["title"] or "fireplace" in v["title"].lower()
+    assert "by the Fire" in v["title"]
     assert media.duration(Path(v["video_path"])) >= 60
     short = db.children(vid)[0]
     assert Path(short["video_path"]).exists()

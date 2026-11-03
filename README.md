@@ -49,6 +49,8 @@ Derlemede parçalar en popüler olanla başlar ve enerji seviyesi en yakın par�
                parçalar sırayla TEKRARLANIR (yeni müzik üretilmez, ElevenLabs kredisi harcanmaz) → onaya gelir
 ```
 
+**İki video tarzı (sırayla):** (1) **Tek sahne** — temaya uygun tek, sinematik bir mekân (şömineli oturma odası, mum ışığında akşam yemeği, yağmurlu pencere, karlı dağ evi…) atlamasız döngüde; (2) **Kolaj** — temadaki kısa klip ve fotoğraflar. `/uret sonbahar sahne` ya da `/uret deniz kolaj` ile seçilebilir; `/ayar daily_visual scene|collage|both`. Müzik her zaman küçük, uyumlu bir topluluktur (piyano + yaylılar, akustik gitar, yumuşak saksafon/çello, pad, hafif fırça davul). Başlıklar: *"<özgün duygusal ifade> ❤️ Romantic Love Music by the Fire | Cozy Night Ambience"* kalıbında, açıklamalar "Perfect for:" maddeli.
+
 **Temalar ve görüntü:** Her parça bir temayla üretilir (deniz kenarı, sonbahar, orman, yağmur, kış, gün batımı, çiçek bahçesi, yıldızlı gece, göl, mum ışığı). Müzik talimatı temanın havasını anlatır; kısa videonun görüntüsü o temadaki Pexels kliplerinden ve fotoğraflarından yumuşak geçişli, atlamasız dönen bir **kolajdır** (aynı klip iki kez kullanılmaz). Uzun derlemelerde **şömine döngüsü** + çıtırtı kullanılır. Pexels anahtarı yoksa kısa videolarda da şömineye geçilir. Ücretsiz anahtar: pexels.com/api → `PEXELS_API_KEY`. Yayın saati 08:00; onay 08:00'den sonra gelirse ertesi sabah 08:00'e zamanlanır.
 
 **Maliyet:** Kredi yalnızca 5 dk'lık parçalarda harcanır (parça başına ~2.600–4.400 kredi). 3 günde bir ≈ ayda 10 parça ≈ 30–45 bin kredi. Uzun derlemeler ücretsizdir. Kalan krediyi Telegram'da `/test` gösterir. `/ayar daily_every_days 2` sıklığı artırır (ayda ~65 bin kredi). İsteğe bağlı `/mix [dk]` tamamen yeni parçalardan uzun mix üretir (dakikada ~600–900 kredi).
@@ -57,7 +59,7 @@ Her parça bir romantik piyano stilinde üretilir; derlemede enerji seviyesi yak
 
 | Anahtar | Stil | Enerji |
 |---|---|---|
-| `romantic_solo_piano` | Romantic Solo Piano | 2 |
+| `romantic_solo_piano` | Romantic Piano & Strings | 2 |
 | `spa_massage_piano` | Spa & Massage Piano | 1 |
 | `dreamy_ambient_love` | Dreamy Ambient Love | 1 |
 | `piano_strings_love` | Piano & Warm Strings | 2 |
@@ -65,6 +67,9 @@ Her parça bir romantik piyano stilinde üretilir; derlemede enerji seviyesi yak
 | `piano_cello_romance` | Piano & Cello Romance | 2 |
 | `candlelight_jazz_piano` | Candlelight Jazz Piano | 3 |
 | `wedding_piano` | Wedding & First Dance Piano | 2 |
+| `fireside_love_ballad` | Fireside Love Ballad (piyano + çello + akustik gitar) | 2 |
+| `romantic_sax_lounge` | Romantic Sax & Piano Lounge | 3 |
+| `acoustic_love_guitar` | Acoustic Love Guitar & Strings | 2 |
 | `rainy_romance_piano` | Rainy Romance Piano | 1 |
 | `classical_romance_piano` | Classical Romantic Piano | 2 |
 

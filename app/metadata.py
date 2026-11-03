@@ -31,7 +31,7 @@ def _client() -> anthropic.Anthropic | None:
 
 
 def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_titles: list[str],
-             extra: str = "", theme_label: str = "") -> VideoMeta:
+             extra: str = "", theme_label: str = "", theme_key: str = "") -> VideoMeta:
     client = _client()
     if client:
         minutes = round(duration_sec / 60)
@@ -59,21 +59,14 @@ def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_ti
             log.warning("Claude meta üretmedi (stop_reason=%s), şablona geçiliyor", resp.stop_reason)
         except anthropic.APIError as e:
             log.warning("Claude API hatası: %s — şablona geçiliyor", e)
-    return fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label)
+    return fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label, theme_key=theme_key)
 
 
 def fallback(kind: str, style: Style, duration_sec: float, rng: random.Random | None = None,
-             scene: str = "", theme_label: str = "") -> VideoMeta:
+             scene: str = "", theme_label: str = "", theme_key: str = "") -> VideoMeta:
     rng = rng or random.Random()
     if profiles.current().key == "romantic":
-        meta = _fallback_romantic(kind, style, duration_sec, rng, fire="fireplace" in scene)
-        if theme_label and kind == "daily":
-            meta = meta.model_copy(update={"title": rng.choice([
-                f"{theme_label} Romance 🎹 Soft {style.label} for Love & Relaxation",
-                f"Romantic Piano • {theme_label} — Tender {style.label} to Relax & Unwind",
-                f"{theme_label} & Love 💕 Calm {style.label} for a Peaceful Moment",
-            ])})
-        return meta
+        return _fallback_romantic(kind, style, duration_sec, rng, fire="fireplace" in scene, theme_key=theme_key)
     minutes = round(duration_sec / 60)
     if kind in ("compilation", "mix"):
         title = rng.choice([
@@ -97,37 +90,40 @@ def fallback(kind: str, style: Style, duration_sec: float, rng: random.Random | 
                      track_name=rng.choice(["Quiet Hours", "Soft Focus", "Late Light", "Paper Moon", "Still Water"]))
 
 
+# Başlığın başındaki özgün, duygusal ifadeler (bilinen şarkı/film adı olmamalı)
+OPENERS = ("Stay Close Tonight", "One More Slow Dance", "Closer by the Fire", "Our Quiet Evening",
+           "Only You Tonight", "Warm Hands, Soft Lights", "Where Our Hearts Rest", "Hold Me a Little Longer",
+           "A Night for Two", "Slow Love, Soft Light", "Just Breathe With Me", "Forever Starts Tonight")
+PERFECT_FOR = ("Romantic evenings & date nights", "Couples & intimate moments", "Wine & candlelit dinners",
+               "Cozy nights at home", "Relaxing after a long day", "Reading & quiet time",
+               "Late-night relaxation", "Massage & self-care", "Falling asleep peacefully",
+               "Anniversaries & special nights")
+
+
 def _fallback_romantic(kind: str, style: Style, duration_sec: float, rng: random.Random,
-                       fire: bool = False) -> VideoMeta:
+                       fire: bool = False, theme_key: str = "") -> VideoMeta:
+    from .themes import SCENES
     length = fmt_long(duration_sec)
-    if fire:
-        title = rng.choice([
-            f"{length} Romantic Piano by the Fireplace 🔥 Crackling Fire & Love Music",
-            f"Cozy Fireplace & {style.label} 🕯️ {length} for Love, Relaxing & Sleep",
-            f"Romantic Fireplace Ambience 🔥 {length} of Tender Piano with Crackling Fire",
-        ])
-        desc = (
-            f"{length} of tender {style.label.lower()} by a warm, crackling fireplace — "
-            "soft melodies and glowing embers to share with someone you love.\n\n"
-            "Perfect for romantic evenings, cozy winter nights, relaxing, reading or drifting off to sleep.\n\n"
-            "Subscribe for new long romantic piano mixes every few days. 💕"
-        )
-        tags = [*profiles.current().base_tags, style.label.lower(), "fireplace", "crackling fire",
-                "fireplace piano", "cozy fireplace ambience"]
-        return VideoMeta(title=title, description=desc, tags=tags, thumbnail_text=style.thumb_word,
-                         track_name=random_track_name(rng))
-    title = rng.choice([
-        f"{length} of {style.label} 💕 Beautiful Romantic Music for Love & Relaxation",
-        f"Romantic Piano Music 🌹 {length} {style.label} for Date Night & Dinner",
-        f"{length} Relaxing Romantic Piano 🕯️ {style.label} for Sleep & Calm",
-        f"Love Songs on Piano 🎹 {length} of Tender {style.label}",
-    ])
+    sc = SCENES.get(theme_key)
+    place = sc.title_place if sc else ("by the Fire" if fire else "for Two")
+    ambience = sc.ambience if sc else ("Cozy Night Ambience" if fire else "Romantic Night Ambience")
+    if kind != "daily":
+        ambience = f"{length} {ambience}"
+    emoji = rng.choice(["❤️", "🕯️", "🌹", "💕", "🌙", "🍷"])
+    title = f"{rng.choice(OPENERS)} {emoji} Romantic Love Music {place} | {ambience}"[:100]
+    scene_text = sc.text if sc else ("a warm room by a crackling fireplace" if fire else "a quiet romantic evening")
+    bullets = "\n".join(f"• {b}" for b in rng.sample(PERFECT_FOR, 8))
     desc = (
-        f"{length} of tender, heartfelt {style.label.lower()} — soft melodies to share with someone you love.\n\n"
-        "Perfect for romantic evenings, candlelit dinners, relaxing after a long day, reading or drifting off to sleep.\n\n"
-        "Subscribe for new long romantic piano mixes every few days. 💕"
+        f"Soft romantic music and {scene_text} come together to create a warm, intimate atmosphere where you "
+        "can slow down, relax and simply be together.\n\n"
+        f"🍷 Perfect for:\n{bullets}\n\n"
+        "Dim the lights, get comfortable and stay a while. 🌙❤️\n\n"
+        "🎧 Relax. Breathe. Love.\n\n"
+        "Subscribe for more romantic love music, cozy ambience and peaceful nights."
     )
-    tags = [*profiles.current().base_tags, style.label.lower(), f"{length.lower()} romantic piano"]
+    tags = [*profiles.current().base_tags, style.label.lower(), "romantic love music", "cozy night ambience"]
+    if fire:
+        tags += ["fireplace", "crackling fire", "fireplace ambience"]
     return VideoMeta(title=title, description=desc, tags=tags, thumbnail_text=style.thumb_word,
                      track_name=random_track_name(rng))
 

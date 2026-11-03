@@ -59,7 +59,7 @@ def test_fallback_title_mentions_hours():
     assert "3 Hours" in m.title
     m = fallback("mix", ROMANTIC_STYLES[0], 85 * 60, random.Random(0))
     assert "1 Hour 25 Min" in m.title
-    assert "#romanticmusic" in full_description(m.description)
+    assert "#RomanticMusic" in full_description(m.description)
 
 
 def test_fmt_long():
@@ -265,6 +265,7 @@ def test_daily_uses_theme_collage_and_short(pipe, monkeypatch, tmp_path):
 
     monkeypatch.setattr(stock, "available", lambda: True)
     monkeypatch.setattr(stock, "fetch", fake_fetch)
+    pipe.db.set_setting("daily_visual", "collage")
     monkeypatch.setattr(stock, "SEGMENT_SEC", 3.0)
     monkeypatch.setattr(stock, "XFADE_SEC", 0.5)
     db = pipe.db
@@ -320,3 +321,32 @@ def test_used_tracks_sorted_by_views(pipe):
     assert [r["views"] for r in rows[:3]] == [120, 40, 5]
     assert rows[-1]["vid"] == pending and rows[-1]["status"] == "pending"
     assert pipe.unused_tracks() == []
+
+
+def test_single_scene_video_and_title_format(pipe, monkeypatch):
+    import subprocess
+    from app import stock
+    from app.themes import SCENES
+
+    def fake_scene(queries, dest, used, rng):
+        dest.mkdir(parents=True, exist_ok=True)
+        pth = dest / "v99.mp4"
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=14",
+                        "-pix_fmt", "yuv420p", str(pth)], check=True, capture_output=True)
+        return stock.StockItem("v99", "video", pth)
+
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch_scene", fake_scene)
+    monkeypatch.setattr(stock, "fetch", lambda *a: [])
+    db = pipe.db
+    vid = pipe.create_daily("fireside_love_ballad", theme_key="autumn", visual="scene")
+    v = db.video(vid)
+    assert (Path(v["video_path"]).parent / "visual.txt").read_text() == "scene"
+    assert pipe._collage(vid) and pipe._collage(vid, "v")
+    assert "Romantic Love Music by the Fire | Cozy Autumn Night Ambience" in v["title"]
+    assert "Perfect for:" in v["description"] and "Footage: Pexels" in v["description"]
+    prompt = db.track(v["track_id"])["prompt"]
+    assert "ensemble" in prompt and "cello" in prompt
+
+    # both: sahne sonrası sıradaki video kolaja geçer (kolaj yoksa yedeğe)
+    assert db.get_setting("last_daily_visual") == "scene"

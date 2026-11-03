@@ -141,11 +141,12 @@ ROMANTIC_STYLES: tuple[Style, ...] = (
     # Hepsi spa / masaj müziği yumuşaklığında: sıcak orta-pes register, uzun notalar, parlak/tiz ses yok.
     Style(
         key="romantic_solo_piano",
-        label="Romantic Solo Piano",
+        label="Romantic Piano & Strings",
         thumb_word="ROMANTIC PIANO",
-        base="soft romantic solo piano instrumental with a slow tender melody, warm low-mid chords and soft pedal",
-        instruments=("warm mellow felt piano", "intimate soft upright piano with dampened tone",
-                     "gentle piano with a faint warm pad underneath"),
+        base="soft romantic piano-led instrumental with a slow tender melody, accompanied by warm strings, "
+             "a soft bass line and gentle pads",
+        instruments=("warm felt piano with soft violas and cellos", "mellow piano with nylon guitar and warm pads",
+                     "gentle piano with a soft string section and light brushed percussion"),
         moods=("tender and heartfelt", "calm and loving", "soothing and warm", "dreamy and peaceful"),
         bpm=(54, 66),
         energy=2,
@@ -200,8 +201,10 @@ ROMANTIC_STYLES: tuple[Style, ...] = (
         key="moonlight_piano",
         label="Moonlight Night Piano",
         thumb_word="MOONLIGHT LOVE",
-        base="soft nocturne-style romantic piano instrumental for late night, slow and quiet with warm reverb",
-        instruments=("soft felt piano", "quiet piano with distant warm pad", "muted piano with soft low drone"),
+        base="soft nocturne-style romantic instrumental for late night, piano with warm strings and pads, "
+             "slow and quiet with warm reverb",
+        instruments=("soft felt piano with muted strings and warm pad", "quiet piano with solo cello and soft pads",
+                     "piano with nylon guitar and distant warm strings"),
         moods=("peaceful and intimate", "calm and loving", "sleepy and tender", "serene midnight romance"),
         bpm=(50, 62),
         energy=1,
@@ -276,6 +279,51 @@ ROMANTIC_STYLES: tuple[Style, ...] = (
         scenes=("outdoor wedding arch with white flowers at sunset in a garden",
                 "bride and groom silhouettes in a field of lavender at golden hour",
                 "elegant reception hall with candles, flowers and soft golden light"),
+    ),
+    # Küçük, uyumlu topluluklar (tek sahneli "by the Fire" tarzı videolar için ideal)
+    Style(
+        key="fireside_love_ballad",
+        label="Fireside Love Ballad",
+        thumb_word="BY THE FIRE",
+        base="warm romantic love ballad instrumental for a cozy night by the fire, piano, cello and nylon acoustic "
+             "guitar sharing a tender melody over soft pads and a gentle bass",
+        instruments=("piano, cello and nylon guitar with soft pads", "piano and warm strings with mellow acoustic guitar",
+                     "acoustic guitar lead with piano chords, soft strings and light brushes"),
+        moods=("cozy and intimate", "tender and loving", "warm and comforting", "romantic and calm"),
+        bpm=(56, 70),
+        energy=2,
+        scenes=("cozy living room by a crackling fireplace at night with an armchair and warm lamps",
+                "wooden cabin interior with a fireplace, blankets and two cups of tea",
+                "stone fireplace with glowing logs and soft candlelight"),
+    ),
+    Style(
+        key="romantic_sax_lounge",
+        label="Romantic Sax & Piano Lounge",
+        thumb_word="LOVE NIGHT",
+        base="slow romantic lounge instrumental with a mellow breathy tenor saxophone, soft piano chords, "
+             "warm upright bass and very soft brushed drums",
+        instruments=("mellow tenor saxophone with piano and upright bass", "soft saxophone and Rhodes piano with warm bass",
+                     "breathy saxophone, piano trio and soft strings"),
+        moods=("smooth and sensual", "late-night romantic", "warm wine-and-candles evening", "calm and intimate"),
+        bpm=(56, 70),
+        energy=3,
+        scenes=("candlelit dinner for two with wine glasses and city lights outside",
+                "dim jazz lounge with red velvet chairs and soft lamps",
+                "rooftop terrace at night with candles and a city skyline"),
+    ),
+    Style(
+        key="acoustic_love_guitar",
+        label="Acoustic Love Guitar & Strings",
+        thumb_word="TENDER LOVE",
+        base="gentle romantic instrumental with fingerstyle nylon acoustic guitar, soft piano, warm strings and "
+             "a light bass, slow and heartfelt",
+        instruments=("nylon guitar with soft piano and strings", "two acoustic guitars with warm cello",
+                     "acoustic guitar, piano and gentle pads"),
+        moods=("heartfelt and sweet", "warm and hopeful", "peaceful and loving"),
+        bpm=(56, 70),
+        energy=2,
+        scenes=("seaside terrace at sunset with lanterns", "garden bench under string lights at dusk",
+                "sunlit bedroom with sheer curtains and flowers"),
     ),
 )
 

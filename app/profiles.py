@@ -36,7 +36,7 @@ SETTING_HELP: dict[str, str] = {
     "compilation_max_min": "Derleme en uzun süre (dk)",
     "daily_every_days": "Kaç günde bir yeni parça videosu üretilsin",
     "publish_roll": "Yayın saati geçtiyse ertesi güne zamanla (1/0; 0 = hemen yayınla)",
-    "daily_visual": "Kısa videoların görüntüsü: collage (temaya uygun klipler) | fireplace | image",
+    "daily_visual": "Kısa video görüntüsü: both (sırayla) | scene (tek sahne) | collage (klip kolajı) | fireplace | image",
     "compilation_fill": "Derleme kısa kalırsa: repeat = parçaları tekrarla (kredisiz), generate = yeni parça üret",
     "mix_every_days": "Kaç günde bir uzun mix üretilsin",
     "mix_min_min": "Mix en kısa süre (dk; 80 = 1 sa 20 dk)",
@@ -112,20 +112,33 @@ ROMANTIC = Profile(
         "middle and lower register, long sustained notes over soft warm ambient pads, smooth gradual "
         "transitions between phrases, steady calm dynamics. No bright, thin, piercing or high-pitched notes, "
         "no sparkly bells or chimes, no sharp attacks, no sudden changes or loud moments. "
-        "Slow fade-in intro and long soft fade-out ending."
+        "Slow fade-in intro and long soft fade-out ending. Arranged for a small harmonious ensemble, not a "
+        "single solo instrument: the lead melody is shared and answered between warm instruments (for example "
+        "piano with soft strings, nylon acoustic guitar, mellow saxophone or cello) over gentle pads, a soft "
+        "bass line and very light brushed percussion, all blending smoothly together."
     ),
     image_style=("Dreamy romantic cinematic painting, soft golden and rose light, gentle bokeh, warm pastel colors, "
                  "elegant and emotional atmosphere, highly detailed"),
-    meta_system="""You write YouTube metadata for an instrumental romantic piano music channel
-(long mixes of tender love-themed piano music for relaxing, date nights, dinner, reading and sleep).
-Every video must feel distinct: vary the title structure, wording and emoji, never reuse a recent title pattern.
-Titles are honest (instrumental, AI-assisted romantic piano music), search-friendly, mention the length
-(e.g. "3 Hours", "1 Hour 30 Minutes") and are not clickbait. Use at most one or two tasteful emoji (💕 🌹 🕯️ 🎹 ✨).
-Descriptions: an evocative, warm opening about the scene and feeling, a line on what it is good for
-(romantic evenings, relaxing, studying, sleeping, wedding or dinner background), and a short invitation
-to subscribe. Write in {lang}. Do not mention specific artists, composers, songs or copyrighted works.
-Do not add hashtags; they are appended separately.""",
-    hashtags="#romanticmusic #pianomusic #lovemusic",
+    meta_system="""You write YouTube metadata for an instrumental romantic love music channel
+(soft romantic music for date nights, cozy evenings, dinner, relaxing, reading and sleep).
+
+TITLE format (max 90 characters):
+"<an original, short, emotional phrase, 2-5 words> <one emoji> Romantic Love Music <place from the scene, e.g.
+by the Fire / by Candlelight / on a Rainy Night> | <Ambience descriptor, e.g. Cozy Night Ambience>"
+For long mixes, add the length to the descriptor, e.g. "| 3 Hours Cozy Night Ambience".
+The opening phrase must be your own words (like an intimate invitation or a feeling) and must NOT be the title
+of an existing song, album or film. Vary the phrase and emoji every time (❤️ 🕯️ 🌹 🔥 🌙 🍷 💕 ✨).
+
+DESCRIPTION (plain text, no markdown):
+1) a warm opening paragraph (2 sentences) about the scene and the feeling the music creates,
+2) a line "🍷 Perfect for:" followed by 8-10 bullet lines starting with "• " (romantic evenings, date nights,
+couples, cozy nights, dinner, relaxing after a long day, reading, late-night relaxation, ...),
+3) a short intimate closing line with one or two emoji,
+4) a three-word tagline like "Relax. Feel. Love." (your own wording),
+5) one line inviting viewers to subscribe for more romantic music.
+Honest: instrumental music made with AI tools. Write in {lang}. Do not mention specific artists, composers,
+songs or copyrighted works. Do not add hashtags; they are appended separately.""",
+    hashtags="#RomanticMusic #LoveMusic #RomanticPiano #CozyNight #RelaxingMusic #DateNight #RomanticAmbience",
     base_tags=("romantic piano", "romantic music", "love music", "relaxing piano", "beautiful piano music",
                "instrumental love songs", "piano for sleep", "dinner music", "wedding piano", "calm piano"),
     long_playlist="Romantic Piano • Long Mixes",
@@ -140,7 +153,7 @@ Do not add hashtags; they are appended separately.""",
         "daily_every_days": "3",
         "publish_time": "08:00",
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
-        "daily_visual": "collage",    # kısa videolar: collage | fireplace | image
+        "daily_visual": "both",       # kısa videolar: both (sırayla sahne/kolaj) | scene | collage | fireplace | image
         "daily_min_sec": "270",
         "daily_max_sec": "330",
         "compilation_every_days": "15",

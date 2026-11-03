@@ -108,6 +108,33 @@ def fetch(theme: Theme, dest: Path, used: set[str], rng: random.Random) -> list[
     return items
 
 
+def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random) -> StockItem | None:
+    """Tek sahneli video için temaya uygun TEK bir klip (yoksa tek bir fotoğraf) indir."""
+    if not available():
+        return None
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        for q in queries:  # önce en uygun arama
+            res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 15, "size": "medium"})
+            vids = [v for v in res.get("videos", []) if v.get("duration", 0) >= 12 and f"v{v['id']}" not in used]
+            for v in rng.sample(vids[:6], min(6, len(vids))):  # en alakalı ilk sonuçlardan biri
+                f = _best_file(v.get("video_files", []))
+                if f:
+                    pid = f"v{v['id']}"
+                    return StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"))
+        for q in queries:
+            res = _get("/v1/search", {"query": q, "orientation": "landscape", "per_page": 15})
+            photos = [p for p in res.get("photos", []) if f"p{p['id']}" not in used]
+            if photos:
+                p = rng.choice(photos[:6])
+                url = p.get("src", {}).get("large2x") or p.get("src", {}).get("original")
+                if url:
+                    return StockItem(f"p{p['id']}", "photo", _download(url, dest / f"p{p['id']}.jpg"))
+    except (requests.RequestException, ValueError, KeyError) as e:
+        log.warning("Pexels sahne araması başarısız: %s", e)
+    return None
+
+
 def _segment(item: StockItem, out: Path, size: tuple[int, int]) -> Path:
     w, h = size
     frames = int(SEGMENT_SEC * media.FPS)
