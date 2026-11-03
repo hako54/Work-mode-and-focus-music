@@ -400,22 +400,35 @@ class Bot:
         await update.message.reply_html("<pre>" + html.escape("\n".join(lines))[-3800:] + "</pre>")
 
     async def cmd_test(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        checks = [
-            ("Claude (metin)", bool(CONFIG.anthropic_api_key), "yoksa şablon başlıklar kullanılır"),
-            ("ElevenLabs (müzik)", bool(CONFIG.elevenlabs_api_key), "zorunlu"),
-            ("Stability (görsel)", bool(CONFIG.stability_api_key), "yoksa prosedürel görsel"),
-        ]
-        text = "\n".join(f"{'✅' if ok else '❌'} {name}" + ("" if ok else f" – {note}") for name, ok, note in checks)
-        if CONFIG.dry_run:
-            text += "\nℹ️ DRY_RUN açık: YouTube atlanıyor"
-        else:
+        fire = profiles.current().key == "romantic" and self.pipe.fireplace_on()
+        lines = [("✅" if CONFIG.anthropic_api_key else "❌") + " Claude (metin)"
+                 + ("" if CONFIG.anthropic_api_key else " – yoksa şablon başlıklar kullanılır")]
+        if CONFIG.elevenlabs_api_key:
             try:
+                left, limit = await asyncio.to_thread(elevenlabs_credits)
+                warn = " ⚠️ az kaldı" if left < 60_000 else ""
+                lines.append(f"✅ ElevenLabs (müzik): {left:,} / {limit:,} kredi kaldı{warn}")
+            except Exception as e:  # noqa: BLE001
+                lines.append(f"⚠️ ElevenLabs: anahtar var ama kredi okunamadı ({html.escape(str(e)[:150])})")
+        else:
+            lines.append("❌ ElevenLabs (müzik) – zorunlu")
+        if fire:
+            lines.append("➖ Stability (görsel) – şömine modunda gerekmiyor")
+        else:
+            lines.append(("✅" if CONFIG.stability_api_key else "❌") + " Stability (görsel)"
+                         + ("" if CONFIG.stability_api_key else " – yoksa prosedürel görsel"))
+        if CONFIG.youtube_client_id and CONFIG.youtube_client_secret and CONFIG.youtube_refresh_token:
+            try:  # DRY_RUN açıkken de bağlantıyı doğrula (yükleme yapmadan)
                 from .youtube import YouTube
                 ch = await asyncio.to_thread(lambda: YouTube().channel())
-                text += f"\n✅ YouTube: {html.escape(ch['title'])}"
+                lines.append(f"✅ YouTube: {html.escape(ch['title'])}")
             except Exception as e:  # noqa: BLE001
-                text += f"\n❌ YouTube: {html.escape(str(e)[:300])}"
-        await update.message.reply_html(text)
+                lines.append(f"❌ YouTube: {html.escape(str(e)[:300])}")
+        else:
+            lines.append("❌ YouTube – YOUTUBE_CLIENT_ID / _SECRET / _REFRESH_TOKEN eksik")
+        if CONFIG.dry_run:
+            lines.append("ℹ️ DRY_RUN açık: videolar YouTube'a yüklenmez")
+        await update.message.reply_html("\n".join(lines))
 
     async def cmd_settings(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if len(ctx.args) >= 2:
@@ -660,3 +673,14 @@ def validate_setting(key: str, value: str) -> str | None:
     if key == "compilation_every_days" and not 1 <= n <= 90:
         return "1–90 gün arası olmalı"
     return None
+
+
+def elevenlabs_credits() -> tuple[int, int]:
+    """ElevenLabs hesabında (kalan, aylık limit) kredi."""
+    import requests
+    r = requests.get("https://api.elevenlabs.io/v1/user/subscription",
+                     headers={"xi-api-key": CONFIG.elevenlabs_api_key}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    used, limit = int(d.get("character_count", 0)), int(d.get("character_limit", 0))
+    return max(0, limit - used), limit
