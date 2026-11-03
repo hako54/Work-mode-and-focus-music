@@ -143,15 +143,21 @@ def seamless_video_loop(src: Path, out: Path, size: tuple[int, int], max_seconds
         f"[0:v]trim=0:{length:.3f},setpts=PTS-STARTPTS,"
         f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={media.FPS},format=yuv420p,"
         "split=3[a][b][c];"
-        f"[a]trim={x:.3f}:{length - x:.3f},setpts=PTS-STARTPTS[mid];"
-        f"[b]trim={length - x:.3f}:{length:.3f},setpts=PTS-STARTPTS[tail];"
-        f"[c]trim=0:{x:.3f},setpts=PTS-STARTPTS[head];"
+        # ffmpeg 7+: setpts kare hızını "bilinmiyor" yapar, xfade sabit kare hızı ister -> fps tekrar verilir
+        f"[a]trim={x:.3f}:{length - x:.3f},setpts=PTS-STARTPTS,fps={media.FPS}[mid];"
+        f"[b]trim={length - x:.3f}:{length:.3f},setpts=PTS-STARTPTS,fps={media.FPS}[tail];"
+        f"[c]trim=0:{x:.3f},setpts=PTS-STARTPTS,fps={media.FPS}[head];"
         f"[tail][head]xfade=transition=fade:duration={x:.3f}:offset=0[blend];"
         "[mid][blend]concat=n=2:v=1:a=0[out]"
     )
-    media.run(["ffmpeg", "-y", "-i", str(src), "-filter_complex", fc, "-map", "[out]", "-an",
-               "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(media.FPS * 2),
-               "-pix_fmt", "yuv420p", str(out)])
+    tmp = out.with_name(out.stem + ".part.mp4")  # başarısız olursa yarım dosya geride kalmasın
+    try:
+        media.run(["ffmpeg", "-y", "-i", str(src), "-filter_complex", fc, "-map", "[out]", "-an",
+                   "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(media.FPS * 2),
+                   "-pix_fmt", "yuv420p", str(tmp)])
+        tmp.replace(out)
+    finally:
+        tmp.unlink(missing_ok=True)
     return out
 
 

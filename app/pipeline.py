@@ -182,7 +182,9 @@ class Pipeline:
                 if self._build_collage(video_id, theme, rng):
                     return theme.scene
             except Exception as e:  # noqa: BLE001
-                log.warning("Kolaj hazırlanamadı, yedeğe geçiliyor: %s", e)
+                log.warning("Kolaj hazırlanamadı, yedeğe geçiliyor: %s", str(e)[-600:])
+            for f in ("collage.mp4", "collage_v.mp4"):  # yarım kalan kolaj render'ı bozmasın
+                (d / f).unlink(missing_ok=True)
         if mode in ("collage", "fireplace") and self.fireplace_on():
             progress("🔥 Şömine arka planı seçiliyor")
             self._daily_fireplace(video_id, rng)
