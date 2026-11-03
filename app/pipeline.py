@@ -66,7 +66,8 @@ class Pipeline:
         return None
 
     # ------------------------------------------------------------------ daily
-    def create_daily(self, style_key: str | None = None, progress: Progress = _noop) -> int:
+    def create_daily(self, style_key: str | None = None, progress: Progress = _noop,
+                     theme_key: str | None = None, auto: bool = False) -> int:
         rng = random.Random()
         recent = [r["style_key"] for r in self.db.query(
             "SELECT style_key FROM videos WHERE kind = 'daily' ORDER BY id DESC LIMIT 5")]
@@ -75,10 +76,12 @@ class Pipeline:
         lo, hi = self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")
         duration = rng.randint(lo, hi)
 
-        theme = self._pick_theme(style, rng) if profiles.current().key == "romantic" else None
+        theme = THEME_BY_KEY.get(theme_key or "") or (
+            self._pick_theme(style, rng) if profiles.current().key == "romantic" else None)
         track_id = self.db.add_track(style_key=style.key, prompt=build_music_prompt(style, rng, theme),
                                      theme=theme.key if theme else None)
-        video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building")
+        video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building",
+                                     source="auto" if auto else "manual")
         try:
             progress(f"🎵 Müzik üretiliyor: {style.label}" + (f" · {theme.emoji} {theme.label}" if theme else "")
                      + f" (~{duration // 60} dk {duration % 60} sn)")
@@ -114,7 +117,8 @@ class Pipeline:
         style = STYLE_BY_KEY.get(t["style_key"], active_styles()[0])
         if not t["theme"] and profiles.current().key == "romantic":
             self.db.update_track(track_id, theme=self._pick_theme(style, rng).key)
-        video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building")
+        video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building",
+                                     source="manual")
         try:
             scene = self._daily_visuals(video_id, style, rng, progress)
             progress("✍️ Başlık ve açıklama yazılıyor")
@@ -540,7 +544,8 @@ class Pipeline:
         now = now or utcnow()
         raw = self.db.get_setting("daily_every_days")
         every = int(raw) if raw else 1
-        last = self.db.one("SELECT created_at FROM videos WHERE kind = 'daily' "
+        # Elle üretilen ekstra videolar (/uret, /parcalar) otomatik takvimi kaydırmaz.
+        last = self.db.one("SELECT created_at FROM videos WHERE kind = 'daily' AND COALESCE(source, 'auto') = 'auto' "
                            "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 1")
         return not last or now - parse_iso(last["created_at"]) >= timedelta(days=every) - timedelta(hours=2)
 
@@ -722,8 +727,10 @@ class Pipeline:
         return n
 
     # ------------------------------------------------------------------ upload
-    def approve(self, video_id: int, progress: Progress = _noop) -> list[str]:
-        """Videoyu (ve varsa Short'unu) YouTube'a yükle. Yüklenen YouTube id'lerini döndürür."""
+    def approve(self, video_id: int, progress: Progress = _noop, publish_now: bool = False) -> list[str]:
+        """Videoyu (ve varsa Short'unu) YouTube'a yükle. Yüklenen YouTube id'lerini döndürür.
+
+        publish_now: yayın saatini beklemeden hemen herkese açık yükle (Short yine gecikmeyle)."""
         from .youtube import YouTube  # Google kütüphanesi testlerde gerekmesin
 
         v = self.db.video(video_id)
@@ -732,7 +739,7 @@ class Pipeline:
             raise ValueError(f"Video #{video_id} onay beklemiyor (durum: {v['status']})")
         items = []
         if v["status"] == "pending":
-            publish_at = self.next_publish_at()
+            publish_at = None if publish_now else self.next_publish_at()
             items.append((v, publish_at))
         else:  # ana video önceden yüklendi, yalnızca Short kaldıysa
             publish_at = parse_iso(v["publish_at"])

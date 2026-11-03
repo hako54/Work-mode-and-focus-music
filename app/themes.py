@@ -96,6 +96,26 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
 }
 
 
+ALIASES = {"deniz": "seaside", "sahil": "seaside", "plaj": "seaside", "kar": "winter", "kis": "winter",
+           "kış": "winter", "snow": "winter", "orman": "forest", "yagmur": "rain", "yağmur": "rain",
+           "sonbahar": "autumn", "fall": "autumn", "gunbatimi": "sunset", "günbatımı": "sunset", "gun": "sunset",
+           "gün": "sunset", "cicek": "flowers", "çiçek": "flowers", "gul": "flowers", "gül": "flowers",
+           "gece": "night_sky", "yildiz": "night_sky", "yıldız": "night_sky", "ay": "night_sky", "moon": "night_sky",
+           "gol": "lake", "göl": "lake", "mum": "candlelight", "candle": "candlelight"}
+
+
+def find_theme(text: str) -> Theme | None:
+    """'autumn', 'sonbahar', 'Sonbahar', 'deniz', 'kar' gibi bir yazıdan temayı bul."""
+    t = text.strip().lower()
+    if t in ALIASES:
+        return THEME_BY_KEY[ALIASES[t]]
+    for th in THEMES:
+        names = {th.key, th.label.lower(), EN_LABEL[th.key].lower(), th.label.lower().split()[0]}
+        if t in names or t.replace("_", " ") in names:
+            return th
+    return None
+
+
 def pick_theme(style_key: str, recent: list[str], rng: random.Random | None = None) -> Theme:
     """Stile uygun temayı tercih et; son 2 temayı tekrar etme."""
     rng = rng or random.Random()

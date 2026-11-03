@@ -20,6 +20,7 @@ from .media import fmt_ts
 from .pipeline import LONG_KINDS, Pipeline
 from .profiles import SETTING_HELP, default_settings
 from .styles import STYLE_BY_KEY, active_styles
+from .themes import EN_LABEL, THEMES, find_theme
 
 log = logging.getLogger(__name__)
 KIND_TR = {"daily": "Günlük", "short": "Short", "compilation": "Derleme", "mix": "Uzun Mix"}
@@ -37,7 +38,8 @@ HELP_PRODUCTION = {
     "romantic": """<b>💕 Romantic Piano Otomasyonu</b>
 
 <b>Üretim</b>
-/uret [stil] – şimdi ~5 dk'lık yeni parça videosu üret (+ Short)
+/uret [stil] [tema] – istediğin an yeni ~5 dk parça + Short (ör. /uret sonbahar); takvimi kaydırmaz
+/temalar – temalar (deniz, sonbahar, orman, yağmur, kar…)
 /derleme – şimdi en çok dinlenenlerden uzun derleme üret (kredi harcamaz)
 /parcalar – üretilmiş ama kullanılmamış parçaları dinle, beğendiklerini videoya çevir (kredisiz)
 /mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
@@ -93,7 +95,7 @@ class Bot:
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
-            "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "arkaplan": self.cmd_backgrounds,
+            "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -166,7 +168,10 @@ class Bot:
 
     # ------------------------------------------------------------------ approval card
     def _keyboard(self, vid: int, kind: str) -> InlineKeyboardMarkup:
-        rows = [[InlineKeyboardButton("✅ Onayla ve yükle", callback_data=f"ap:{vid}"),
+        when = self.pipe.next_publish_at()
+        rows = [[InlineKeyboardButton("✅ Onayla" + (f" ({when.astimezone(self.tz):%H:%M})" if when else ""),
+                                      callback_data=f"ap:{vid}"),
+                 InlineKeyboardButton("⚡ Hemen yayınla", callback_data=f"an:{vid}"),
                  InlineKeyboardButton("❌ Reddet", callback_data=f"rj:{vid}")]]
         regen = [InlineKeyboardButton("🖼 Görsel", callback_data=f"ri:{vid}"),
                  InlineKeyboardButton("✏️ Metin", callback_data=f"rt:{vid}")]
@@ -211,9 +216,12 @@ class Bot:
         return (rows[0]["start_sec"] + rows[0]["duration_sec"]) if rows else 0.0
 
     # ------------------------------------------------------------------ actions
-    async def do_generate(self, style_key: str | None = None) -> None:
+    async def do_generate(self, style_key: str | None = None, theme_key: str | None = None,
+                          auto: bool = False) -> None:
         try:
-            vid = await self.run_heavy("günlük video", self.pipe.create_daily, style_key)
+            def work(key, progress):
+                return self.pipe.create_daily(key, progress, theme_key=theme_key, auto=auto)
+            vid = await self.run_heavy("günlük video", work, style_key)
             await self.send_card(vid)
         except Exception as e:  # noqa: BLE001
             log.exception("Günlük üretim hatası")
@@ -238,9 +246,11 @@ class Bot:
             log.exception("Derleme hatası")
             await self.notify(f"⚠️ Derleme üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
 
-    async def do_approve(self, vid: int) -> None:
+    async def do_approve(self, vid: int, now: bool = False) -> None:
         try:
-            ids = await self.run_heavy("yükleme", self.pipe.approve, vid)
+            def work(video_id, progress):
+                return self.pipe.approve(video_id, progress, publish_now=now)
+            ids = await self.run_heavy("yükleme", work, vid)
             links = "\n".join(f"▶️ https://youtu.be/{i}\n✏️ Studio: https://studio.youtube.com/video/{i}/edit"
                               for i in ids)
             v = self.db.video(vid)
@@ -285,11 +295,12 @@ class Bot:
         if not has_pending:
             await q.edit_message_text(f"#{vid}: {STATUS_TR.get(v['status'], v['status'])}")
             return
-        labels = {"ap": "✅ Onaylandı, yükleniyor…", "rj": "🗑 Reddedildi", "rm": "🎵 Müzik yenileniyor…",
+        labels = {"ap": "✅ Onaylandı, yükleniyor…", "an": "⚡ Onaylandı, hemen yayınlanmak üzere yükleniyor…",
+                  "rj": "🗑 Reddedildi", "rm": "🎵 Müzik yenileniyor…",
                   "ri": "🖼 Görsel yenileniyor…", "rt": "✏️ Metin yenileniyor…"}
         await q.edit_message_text(f"#{vid}: {labels.get(action, action)}")
-        if action == "ap":
-            asyncio.create_task(self.do_approve(vid))
+        if action in ("ap", "an"):
+            asyncio.create_task(self.do_approve(vid, now=action == "an"))
         elif action == "rj":
             self.pipe.reject(vid)
         elif action in ("rm", "ri", "rt"):
@@ -364,17 +375,30 @@ class Bot:
             f"<b>Sıradaki işler</b>\n{nxt}\n\n<b>Son videolar</b>\n{lines or '-'}")
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        key = ctx.args[0] if ctx.args else None
-        if key and key not in {s.key for s in active_styles()}:
-            await update.message.reply_text("Bilinmeyen stil. /stiller ile listeyi görün.")
-            return
+        key, theme = None, None
+        for a in ctx.args:  # /uret [stil] [tema] — sıra fark etmez
+            if a in {s.key for s in active_styles()}:
+                key = a
+            elif find_theme(a):
+                theme = find_theme(a)
+            else:
+                await update.message.reply_text(f"'{a}' bir stil ya da tema değil. /stiller ve /temalar ile listeye bakın.")
+                return
         if profiles.current().main_kind == "mix":
             await update.message.reply_text("💕 Uzun mix üretimi başladı. Parça sayısına göre 20–60 dk sürebilir; "
                                             "adımlar buraya gelecek.")
             asyncio.create_task(self.do_mix(key))
             return
-        await update.message.reply_text("🎬 Günlük video üretimi başladı, adımlar buraya gelecek.")
-        asyncio.create_task(self.do_generate(key))
+        await update.message.reply_text(
+            "🎬 Yeni parça üretimi başladı" + (f" ({theme.emoji} {theme.label})" if theme else "") +
+            ", adımlar buraya gelecek. Bu ekstra video otomatik takvimi değiştirmez.")
+        asyncio.create_task(self.do_generate(key, theme.key if theme else None))
+
+    async def cmd_themes(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        lines = [f"{t.emoji} <code>{t.key}</code> – {t.label} ({EN_LABEL[t.key]})" for t in THEMES]
+        await update.message.reply_html("<b>Temalar</b>\n" + "\n".join(lines) +
+                                        "\n\nÖrnek: <code>/uret sonbahar</code> · <code>/uret deniz</code> · "
+                                        "<code>/uret moonlight_piano kar</code>")
 
     async def cmd_compilation(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if profiles.current().main_kind == "mix":
@@ -620,7 +644,7 @@ class Bot:
                 return  # bugün zaten elle üretilmiş
         if not self.pipe.daily_due():
             return  # daily_every_days dolmadı (romantic: 3 günde bir)
-        await self.do_generate()
+        await self.do_generate(auto=True)
 
     async def job_mix(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self.paused() or not self.pipe.mix_due():

@@ -178,7 +178,7 @@ def test_daily_with_fireplace_and_crackle_then_free_compilation(pipe, monkeypatc
     assert pipe.daily_due()
     ids = []
     for st in ROMANTIC_STYLES[:3]:
-        vid = pipe.create_daily(st.key)
+        vid = pipe.create_daily(st.key, auto=True)
         v = db.video(vid)
         assert pipe._background(vid) is not None                      # şömine arka planı
         assert (Path(v["video_path"]).parent / "audio.mp3").exists()  # çıtırtılı ses
@@ -281,3 +281,27 @@ def test_daily_uses_theme_collage_and_short(pipe, monkeypatch, tmp_path):
     assert Path(short["video_path"]).exists()
     pipe.approve(vid)
     assert pipe._collage(vid) is None                      # yüklendikten sonra kolaj silinir
+
+
+def test_manual_extras_choose_theme_and_do_not_shift_schedule(pipe):
+    from app.themes import find_theme
+    assert find_theme("sonbahar").key == "autumn" and find_theme("kar").key == "winter"
+    assert find_theme("Deniz").key == "seaside" and find_theme("autumn").key == "autumn"
+    assert find_theme("pizza") is None
+
+    db = pipe.db
+    auto = pipe.create_daily(ROMANTIC_STYLES[0].key, auto=True)
+    assert not pipe.daily_due()
+    manual = pipe.create_daily(ROMANTIC_STYLES[1].key, theme_key="winter")
+    assert db.track(db.video(manual)["track_id"])["theme"] == "winter"
+    old = iso(datetime.now(timezone.utc) - timedelta(days=4))
+    db.update_video(auto, created_at=old)
+    assert pipe.daily_due()  # yeni elle üretilen video takvimi kaydırmadı
+
+
+def test_publish_now_skips_schedule(pipe):
+    db = pipe.db
+    db.set_setting("publish_time", "23:59")
+    vid = pipe.create_daily(ROMANTIC_STYLES[0].key)
+    pipe.approve(vid, publish_now=True)
+    assert db.video(vid)["status"] == "published"
