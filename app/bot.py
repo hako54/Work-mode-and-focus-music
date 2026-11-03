@@ -240,10 +240,13 @@ class Bot:
     async def do_approve(self, vid: int) -> None:
         try:
             ids = await self.run_heavy("yükleme", self.pipe.approve, vid)
-            links = "\n".join(f"https://youtu.be/{i}" for i in ids)
+            links = "\n".join(f"▶️ https://youtu.be/{i}\n✏️ Studio: https://studio.youtube.com/video/{i}/edit"
+                              for i in ids)
             v = self.db.video(vid)
             await self.notify(f"✅ #{vid} yüklendi ({STATUS_TR.get(v['status'], v['status'])}, "
-                              f"yayın {self.local(v['publish_at'])})\n{links}")
+                              f"yayın {self.local(v['publish_at'])})\n{links}\n\n"
+                              "ℹ️ Video gizli (private) kalırsa Studio bağlantısından "
+                              "<b>Visibility → Public</b> yapın (API audit olmadan YouTube böyle kilitler).")
         except Exception as e:  # noqa: BLE001
             log.exception("Yükleme hatası")
             await self.notify(f"⚠️ #{vid} yüklenemedi, onay bekliyor olarak kaldı:\n"
