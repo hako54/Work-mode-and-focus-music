@@ -90,6 +90,20 @@ def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0, bed: Pa
     return starts
 
 
+def add_bed(src: Path, bed: Path, out: Path, volume: float, soft: bool = True) -> Path:
+    """Tek parçanın altına döngüyle ortam sesi (ör. ateş çıtırtısı) karıştır."""
+    total = duration(src)
+    fade = min(8.0, total / 4)
+    fc = (f"[1:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo,"
+          f"lowpass=f=5000,volume={volume:.3f},afade=t=in:d=3,afade=t=out:st={total - fade:.3f}:d={fade:.3f}[bed];"
+          "[0:a]aformat=sample_rates=44100:channel_layouts=stereo[mus];"
+          "[mus][bed]amix=inputs=2:duration=first:normalize=0,"
+          f"loudnorm=I={-16 if soft else -14}:TP=-1.5:LRA={7 if soft else 11}[out]")
+    run(["ffmpeg", "-y", "-i", str(src), "-stream_loop", "-1", "-i", str(bed), "-filter_complex", fc,
+         "-map", "[out]", "-ar", "44100", "-b:a", "192k", str(out)])
+    return out
+
+
 def make_preview(src: Path, out: Path, max_seconds: float | None = None) -> Path:
     """Telegram'a gönderilecek düşük boyutlu önizleme (bot limiti 50 MB)."""
     cmd = ["ffmpeg", "-y", "-i", str(src)]

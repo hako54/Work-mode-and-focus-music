@@ -34,6 +34,8 @@ SETTING_HELP: dict[str, str] = {
     "compilation_every_days": "Derleme sıklığı (gün)",
     "compilation_min_min": "Derleme en kısa süre (dk)",
     "compilation_max_min": "Derleme en uzun süre (dk)",
+    "daily_every_days": "Kaç günde bir yeni parça videosu üretilsin",
+    "compilation_fill": "Derleme kısa kalırsa: repeat = parçaları tekrarla (kredisiz), generate = yeni parça üret",
     "mix_every_days": "Kaç günde bir uzun mix üretilsin",
     "mix_min_min": "Mix en kısa süre (dk; 80 = 1 sa 20 dk)",
     "mix_max_min": "Mix en uzun süre (dk; 180 = 3 sa)",
@@ -99,7 +101,7 @@ Do not mention specific artists or copyrighted works. Do not add hashtags; they 
 
 ROMANTIC = Profile(
     key="romantic",
-    main_kind="mix",
+    main_kind="daily",  # 3 günde bir ~5 dk'lık parça; 15 günde bir kredisiz uzun derleme
     default_channel_name="Evermore Romance Piano",
     default_handle="EvermoreRomancePiano",
     music_purpose=(
@@ -133,11 +135,18 @@ Do not add hashtags; they are appended separately.""",
          "Vow", "Memory", "Sky", "Garden", "Evening", "Glance", "Kiss", "Lullaby", "Shore", "Light"),
     ),
     extra_settings={
+        "daily_every_days": "3",
+        "daily_min_sec": "270",
+        "daily_max_sec": "330",
+        "compilation_every_days": "15",
+        "compilation_min_min": "80",
+        "compilation_max_min": "180",
+        "compilation_fill": "repeat",  # derleme kısa kalırsa parçaları tekrarla (kredi harcamaz)
         "mix_every_days": "2",
         "mix_min_min": "80",
         "mix_max_min": "180",
         "mix_reuse_pct": "25",
-        "library_keep_days": "14",  # 5 GB volume için: ~7 mixlik parça + 1 render
+        "library_keep_days": "0",  # parçalar derlemeler için hep saklanır (5 dk ≈ 7 MB)
         "fireplace": "1",
         "fire_volume": "20",
         "soft_master": "1",

@@ -75,8 +75,12 @@ class Pipeline:
         try:
             progress(f"🎵 Müzik üretiliyor: {style.label} (~{duration // 60} dk {duration % 60} sn)")
             self._make_track_audio(track_id, duration)
-            progress("🖼 Görsel hazırlanıyor")
-            scene = self._make_track_image(track_id, style, rng)
+            if self.fireplace_on():
+                progress("🔥 Şömine arka planı seçiliyor")
+                scene = self._daily_fireplace(video_id, rng)
+            else:
+                progress("🖼 Görsel hazırlanıyor")
+                scene = self._make_track_image(track_id, style, rng)
             progress("✍️ Başlık ve açıklama yazılıyor")
             self._write_meta(video_id, style, scene)
             progress("🎬 Video render ediliyor")
@@ -108,6 +112,31 @@ class Pipeline:
         self.db.update_track(track_id, image_path=str(img))
         return prompt.split(".")[0]
 
+    FIRE_SCENE = "a cozy wood fireplace burning at night, warm flickering flames and glowing embers"
+
+    def _daily_fireplace(self, video_id: int, rng: random.Random) -> str:
+        """Tek parçalık video için şömine arka planı seç; kareyi parçanın görseli yap."""
+        v = self.db.video(video_id)
+        marker = self._dir(f"video_{video_id}") / "background.txt"
+        prev = marker.read_text().strip() if marker.exists() else None
+        bg = fireplace.pick_background(rng, avoid=prev)
+        marker.write_text(bg.name)
+        img = fireplace.still_frame(bg, self._dir(f"track_{v['track_id']}") / "image.png")
+        self.db.update_track(v["track_id"], image_path=str(img))
+        return self.FIRE_SCENE
+
+    def _fire_volume(self) -> int:
+        raw = self.db.get_setting("fire_volume")
+        return int(raw) if raw else 0
+
+    def _video_audio(self, video_id: int, track_audio: Path) -> Path:
+        """Şömine modunda parçanın altına çıtırtı ekle (kütüphanedeki parça temiz kalır)."""
+        if not self._background(video_id) or self._fire_volume() <= 0:
+            return track_audio
+        out = self._dir(f"video_{video_id}") / "audio.mp3"
+        return media.add_bed(track_audio, fireplace.ambience_bed(), out, self._fire_volume() / 100,
+                             soft=self.db.get_setting("soft_master") == "1")
+
     def _write_meta(self, video_id: int, style: Style, scene: str) -> None:
         v = self.db.video(video_id)
         t = self.db.track(v["track_id"])
@@ -120,12 +149,15 @@ class Pipeline:
         v = self.db.video(video_id)
         t = self.db.track(v["track_id"])
         d = self._dir(f"video_{video_id}")
-        loop = media.make_loop(Path(t["image_path"]), d / "loop.mp4")
-        out = media.mux(loop, Path(t["audio_path"]), d / "video.mp4")
-        loop.unlink(missing_ok=True)
+        bg = self._background(video_id)
+        audio = self._video_audio(video_id, Path(t["audio_path"]))
+        loop = fireplace.loop_for(bg, (1920, 1080)) if bg else media.make_loop(Path(t["image_path"]), d / "loop.mp4")
+        out = media.mux(loop, audio, d / "video.mp4")
+        if not bg:  # şömine döngüleri önbellekte kalır
+            loop.unlink(missing_ok=True)
         thumb = visuals.make_thumbnail(Path(t["image_path"]), d / "thumb.jpg", v["thumbnail_text"] or "FOCUS",
                                        STYLE_BY_KEY[v["style_key"]].label)
-        preview = media.make_preview(Path(t["audio_path"]), d / "preview.mp3")
+        preview = media.make_preview(audio, d / "preview.mp3")
         self.db.update_video(video_id, video_path=str(out), thumb_path=str(thumb), preview_path=str(preview))
 
     def _make_short(self, parent_id: int) -> int:
@@ -136,6 +168,9 @@ class Pipeline:
         if parent["track_id"]:
             t = self.db.track(parent["track_id"])
             audio, image, track_name = Path(t["audio_path"]), Path(t["image_path"]), t["name"]
+            with_bed = CONFIG.media_dir / f"video_{parent_id}" / "audio.mp3"
+            if self._background(parent_id) and with_bed.exists():
+                audio = with_bed  # Short'ta da çıtırtı olsun
             start = max(0.0, min(t["duration_sec"] * 0.3, t["duration_sec"] - length - 1))
         else:  # uzun mix: ikinci parçanın (yoksa ilkinin) içinden bir kesit
             pd = CONFIG.media_dir / f"video_{parent_id}"
@@ -150,7 +185,7 @@ class Pipeline:
                                      style_key=parent["style_key"], status="building")
         d = self._dir(f"video_{short_id}")
         seg = media.cut_segment(audio, d / "segment.mp3", start, length)
-        bg = None if parent["track_id"] else self._background(parent_id)
+        bg = self._background(parent_id)
         if bg:
             loop = fireplace.loop_for(bg, (1080, 1920))
         else:
@@ -191,11 +226,15 @@ class Pipeline:
             progress("🎵 Müzik yeniden üretiliyor")
             self._make_track_audio(t["id"], int(t["duration_sec"] or self.db.get_int("daily_min_sec")))
         elif part == "image":
-            progress("🖼 Görsel yeniden üretiliyor")
-            self._make_track_image(v["track_id"], style, rng)
+            if self.fireplace_on():
+                progress("🔥 Başka bir şömine arka planı seçiliyor")
+                self._daily_fireplace(video_id, rng)
+            else:
+                progress("🖼 Görsel yeniden üretiliyor")
+                self._make_track_image(v["track_id"], style, rng)
         elif part == "meta":
             progress("✍️ Metin yeniden yazılıyor")
-            self._write_meta(video_id, style, style.scenes[0])
+            self._write_meta(video_id, style, self.FIRE_SCENE if self._background(video_id) else style.scenes[0])
         progress("🎬 Video yeniden render ediliyor")
         self._render_daily(video_id)
         if self.db.get_setting("make_shorts") == "1" and part != "meta":
@@ -231,8 +270,9 @@ class Pipeline:
         # Önce son dönemin parçaları, sonra daha önce derlemeye girmemiş eski hitler.
         scored.sort(key=lambda x: (not x["fresh"], x["used"], -x["score"]))
         chosen, total = [], 0.0
+        repeat = self.db.get_setting("compilation_fill") == "repeat"
         for s in scored:
-            if s["used"] and not s["fresh"]:
+            if s["used"] and not s["fresh"] and not repeat:
                 continue
             if total + s["duration"] > max_sec:
                 continue
@@ -243,10 +283,28 @@ class Pipeline:
     def create_compilation(self, progress: Progress = _noop) -> int:
         rng = random.Random()
         min_sec = self.db.get_int("compilation_min_min") * 60
+        x = float(self.db.get_setting("mix_crossfade_sec") or 6)
         chosen = self.select_compilation_tracks()
-        total = sum(c["duration"] - 6 for c in chosen)
+        total = sum(c["duration"] - x for c in chosen)
 
-        if total < min_sec:  # yeterli parça yoksa en başarılı stilde ek "exclusive" parça üret
+        if total < min_sec and self.db.get_setting("compilation_fill") == "repeat":
+            # Kredisiz: en çok dinlenenler sırasıyla tekrar edilerek hedef süreye tamamlanır.
+            if not chosen:
+                raise ValueError("Derlenecek yayınlanmış parça yok; önce birkaç parça videosu yayınlanmalı.")
+            lo = min_sec
+            hi = max(lo, self.db.get_int("compilation_max_min") * 60)
+            target = rng.randint(lo, hi)
+            base = list(chosen)
+            if len(base) > 2 and base[0]["id"] == base[-1]["id"]:
+                base = base[1:] + base[:1]
+            while total < target:
+                for c in base:
+                    if total >= target:
+                        break
+                    chosen.append(dict(c))
+                    total += c["duration"] - x
+            progress(f"🔁 {len(base)} parça tekrarlanarak {media.fmt_long(total)} derleme hazırlanıyor (kredisiz)")
+        elif total < min_sec:  # yeterli parça yoksa en başarılı stilde ek "exclusive" parça üret
             perf = self.style_performance()
             style = STYLE_BY_KEY[max(perf, key=perf.get)] if perf else rng.choice(active_styles())
             while total < min_sec:
@@ -259,7 +317,7 @@ class Pipeline:
                 t = self.db.track(tid)
                 chosen.append({"id": tid, "style_key": style.key, "name": t["name"], "duration": t["duration_sec"],
                                "audio_path": t["audio_path"], "score": 0.0, "fresh": True, "used": False})
-                total += t["duration_sec"] - 6
+                total += t["duration_sec"] - x
             chosen = order_for_flow(chosen)
 
         styles = [c["style_key"] for c in chosen]
@@ -268,7 +326,10 @@ class Pipeline:
         try:
             progress(f"🎚 {len(chosen)} parça crossfade ile birleştiriliyor")
             d = self._dir(f"video_{video_id}")
-            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3")
+            vol = self._fire_volume() if self.fireplace_on() else 0
+            bed = fireplace.ambience_bed() if vol > 0 else None
+            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3", xfade=x,
+                                            bed=bed, bed_volume=vol / 100)
             with self.db.tx() as c:
                 for pos, (ch, st) in enumerate(zip(chosen, starts)):
                     c.execute("INSERT INTO compilation_tracks(video_id, track_id, position, start_sec) "
@@ -356,6 +417,15 @@ class Pipeline:
         preview = media.make_preview(d / "mix.mp3", d / "preview.mp3", max_seconds=600)
         self.db.update_video(video_id, video_path=str(out), preview_path=str(preview))
         self._compilation_thumb(video_id)
+
+    def daily_due(self, now: datetime | None = None) -> bool:
+        """`daily_every_days` (varsayılan 1) geçtiyse yeni parça videosu zamanı."""
+        now = now or utcnow()
+        raw = self.db.get_setting("daily_every_days")
+        every = int(raw) if raw else 1
+        last = self.db.one("SELECT created_at FROM videos WHERE kind = 'daily' "
+                           "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 1")
+        return not last or now - parse_iso(last["created_at"]) >= timedelta(days=every) - timedelta(hours=2)
 
     def compilation_due(self, now: datetime | None = None) -> bool:
         now = now or utcnow()

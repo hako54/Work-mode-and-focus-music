@@ -33,10 +33,14 @@ def pipe(tmp_path, monkeypatch):
     return Pipeline(db)
 
 
-def test_defaults_target_80_to_180_minutes(tmp_path):
+def test_defaults_short_tracks_and_long_compilations(tmp_path):
     db = Database(tmp_path / "d.db")
-    assert db.get_int("mix_min_min") == 80 and db.get_int("mix_max_min") == 180
-    assert db.get_setting("compilation_every_days") == ""  # focus'a özel ayar görünmez
+    assert profiles.current().main_kind == "daily"
+    assert db.get_int("daily_every_days") == 3
+    assert 270 <= db.get_int("daily_min_sec") <= db.get_int("daily_max_sec") <= 330
+    assert db.get_int("compilation_every_days") == 15
+    assert db.get_int("compilation_min_min") == 80 and db.get_int("compilation_max_min") == 180
+    assert db.get_setting("compilation_fill") == "repeat"
 
 
 def test_styles_and_prompts_are_romantic_piano():
@@ -127,6 +131,8 @@ def test_reuse_respects_cap_and_prune(pipe):
     old = iso(datetime.now(timezone.utc) - timedelta(days=200))
     with db.tx() as c:
         c.execute("UPDATE tracks SET created_at = ?", (old,))
+    assert pipe.prune_library() == 0  # varsayılan 0 = parçalar derlemeler için hep saklanır
+    db.set_setting("library_keep_days", "30")
     assert pipe.prune_library() > 0
     assert db.one("SELECT COUNT(*) n FROM tracks WHERE audio_path IS NOT NULL")["n"] == 0
 
@@ -157,3 +163,45 @@ def test_description_has_subscribe_link():
     d = full_description("Body")
     assert "https://www.youtube.com/@EvermoreRomancePiano?sub_confirmation=1" in d
     assert "Evermore Romance Piano" in d
+
+
+def test_daily_with_fireplace_and_crackle_then_free_compilation(pipe, monkeypatch):
+    db = pipe.db
+    calls = []
+
+    class Counting(FakeMusic):
+        def compose(self, prompt, duration_sec, out_path):
+            calls.append(duration_sec)
+            return super().compose(prompt, duration_sec, out_path)
+
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: Counting())
+    assert pipe.daily_due()
+    ids = []
+    for st in ROMANTIC_STYLES[:3]:
+        vid = pipe.create_daily(st.key)
+        v = db.video(vid)
+        assert pipe._background(vid) is not None                      # şömine arka planı
+        assert (Path(v["video_path"]).parent / "audio.mp3").exists()  # çıtırtılı ses
+        assert len(db.children(vid)) == 1
+        pipe.approve(vid)
+        db.update_video(vid, status="published", views=10)
+        ids.append(vid)
+    assert not pipe.daily_due()
+    made = len(calls)
+
+    db.set_setting("compilation_min_min", "1")
+    db.set_setting("compilation_max_min", "1")
+    cid = pipe.create_compilation()
+    assert len(calls) == made  # derleme kredi harcamadı
+    rows = db.query("SELECT track_id FROM compilation_tracks WHERE video_id = ?", (cid,))
+    assert len(rows) > 3  # 3 parça tekrarlanarak 1 dk'ya tamamlandı
+    c = db.video(cid)
+    assert media.duration(Path(c["video_path"])) >= 60
+    assert pipe._background(cid) is not None
+
+
+def test_validate_new_settings():
+    assert validate_setting("compilation_fill", "repeat") is None
+    assert validate_setting("compilation_fill", "x")
+    assert validate_setting("daily_every_days", "3") is None
+    assert validate_setting("daily_every_days", "30")

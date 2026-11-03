@@ -37,9 +37,11 @@ HELP_PRODUCTION = {
     "romantic": """<b>💕 Romantic Piano Otomasyonu</b>
 
 <b>Üretim</b>
-/uret [stil] – şimdi uzun romantik mix üret (1 sa 20 dk – 3 sa+)
-/demo [dk] [stil] – kısa deneme mix'i (varsayılan 10 dk, düşük maliyet)
-/kutuphane – parça kütüphanesi (yeniden kullanılabilir parçalar)
+/uret [stil] – şimdi ~5 dk'lık yeni parça videosu üret (+ Short)
+/derleme – şimdi en çok dinlenenlerden uzun derleme üret (kredi harcamaz)
+/mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
+
+<i>Otomatik: 3 günde bir yeni parça, 15 günde bir 80–180 dk derleme.</i>
 
 <b>🔥 Şömine</b>
 Bota şömine <b>videosu</b> (10–40 sn, en fazla 20 MB) ya da <b>fotoğrafı</b> gönderin: arka plan döngüsü olur.
@@ -89,7 +91,7 @@ class Bot:
             "baslik": self.cmd_title, "istatistik": self.cmd_stats, "log": self.cmd_log, "test": self.cmd_test,
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
-            "demo": self.cmd_demo, "arkaplan": self.cmd_backgrounds,
+            "demo": self.cmd_generate, "mix": self.cmd_demo, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -474,8 +476,9 @@ class Bot:
         await update.message.reply_text(f"✅ {ctx.args[0]} {'kapatıldı' if ctx.args[1] == 'kapat' else 'açıldı'}")
 
     async def cmd_demo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if profiles.current().main_kind != "mix":
-            await update.message.reply_text("/demo yalnızca romantic profilinde var; burada /uret kullanın.")
+        """/mix: tamamı yeni parçalardan uzun mix (romantic). Dakika başına ~600-900 ElevenLabs kredisi."""
+        if profiles.current().key != "romantic":
+            await update.message.reply_text("/mix yalnızca romantic profilinde var; burada /uret kullanın.")
             return
         minutes, key = 10, None
         for a in ctx.args:
@@ -484,8 +487,8 @@ class Bot:
             elif a in {s.key for s in active_styles()}:
                 key = a
         await update.message.reply_text(
-            f"🎧 {minutes} dk'lık deneme mix'i üretiliyor (~{minutes} dk müzik kredisi). Hazır olunca ses önizlemesi "
-            "gelecek. Yayınlamak istemezseniz kartta ❌ Reddet deyin; parçalar bir sonraki mixte kullanılır.")
+            f"🎧 {minutes} dk'lık mix üretiliyor (~{minutes * 750:,} ElevenLabs kredisi). Hazır olunca ses "
+            "önizlemesi gelecek. Yayınlamak istemezseniz kartta ❌ Reddet deyin.")
         asyncio.create_task(self.do_mix(key, minutes))
 
     async def on_media(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -562,6 +565,8 @@ class Bot:
                                "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 3"):
             if parse_iso(r["created_at"]).astimezone(self.tz).date() == today:
                 return  # bugün zaten elle üretilmiş
+        if not self.pipe.daily_due():
+            return  # daily_every_days dolmadı (romantic: 3 günde bir)
         await self.do_generate()
 
     async def job_mix(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -638,6 +643,8 @@ class Bot:
 
 
 def validate_setting(key: str, value: str) -> str | None:
+    if key == "compilation_fill":
+        return None if value in ("repeat", "generate") else "repeat ya da generate olmalı"
     if key.endswith("_time"):
         try:
             hh, mm = (int(x) for x in value.split(":"))
@@ -660,6 +667,8 @@ def validate_setting(key: str, value: str) -> str | None:
         return "30–360 dk arası olmalı"
     if key == "mix_every_days" and not 1 <= n <= 30:
         return "1–30 gün arası olmalı"
+    if key == "daily_every_days" and not 1 <= n <= 14:
+        return "1–14 gün arası olmalı"
     if key == "mix_reuse_pct" and not 0 <= n <= 80:
         return "0–80 arası olmalı"
     if key == "fireplace" and n not in (0, 1):

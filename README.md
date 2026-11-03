@@ -43,14 +43,15 @@ Derlemede parçalar en popüler olanla başlar ve enerji seviyesi en yakın par�
 ## Romantic Piano kanalı
 
 ```
-09:00  (2 günde bir) Bot romantik piyano stilini seçer → hedef süre seçilir (80–180 dk arası rastgele)
-       → 3–5 dk'lık ~20–40 yeni parça üretilir (ElevenLabs, sözsüz) → 12 sn yumuşak geçişlerle tek mix
-       → görsel (Stability) → başlık/açıklama + zaman damgalı parça listesi (Claude) → 1080p video + Short
-       → Telegram'a onaya gelir
-Onay → YouTube'a yüklenir, yayın saatinde açılır, "Romantic Piano • Long Mixes" ve stil playlist'ine eklenir
+09:00  (3 günde bir) Romantik piyano stili seçilir → ~5 dk'lık yeni parça (ElevenLabs, sözsüz, yumuşatılmış)
+       → şömine arka planı + altında ateş çıtırtısı → başlık/açıklama (Claude) → 1080p video + Short → Telegram'a onay
+15 günde bir → en çok dinlenen parçalar sıralanıp 12 sn yumuşak geçişlerle birleştirilir; 80–180 dk'ya yetmezse
+               parçalar sırayla TEKRARLANIR (yeni müzik üretilmez, ElevenLabs kredisi harcanmaz) → onaya gelir
 ```
 
-Her mix tek bir stilde kalır (referans videodaki gibi bütünlüklü bir dinleme), parçalar enstrüman, ruh hâli, ton ve tempo bakımından değişir.
+**Maliyet:** Kredi yalnızca 5 dk'lık parçalarda harcanır (parça başına ~2.600–4.400 kredi). 3 günde bir ≈ ayda 10 parça ≈ 30–45 bin kredi. Uzun derlemeler ücretsizdir. Kalan krediyi Telegram'da `/test` gösterir. `/ayar daily_every_days 2` sıklığı artırır (ayda ~65 bin kredi). İsteğe bağlı `/mix [dk]` tamamen yeni parçalardan uzun mix üretir (dakikada ~600–900 kredi).
+
+Her parça bir romantik piyano stilinde üretilir; derlemede enerji seviyesi yakın parçalar art arda gelir.
 
 | Anahtar | Stil | Enerji |
 |---|---|---|
