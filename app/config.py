@@ -37,6 +37,8 @@ class Config:
     elevenlabs_model: str = field(default_factory=lambda: _env("ELEVENLABS_MUSIC_MODEL", "music_v1"))
 
     stability_api_key: str = field(default_factory=lambda: _env("STABILITY_API_KEY"))
+    # Temaya uygun stok klip/fotoğraf kolajı için (ücretsiz: pexels.com/api)
+    pexels_api_key: str = field(default_factory=lambda: _env("PEXELS_API_KEY"))
 
     youtube_client_id: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_ID"))
     youtube_client_secret: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_SECRET"))

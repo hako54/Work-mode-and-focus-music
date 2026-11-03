@@ -42,7 +42,8 @@ HELP_PRODUCTION = {
 /parcalar – üretilmiş ama kullanılmamış parçaları dinle, beğendiklerini videoya çevir (kredisiz)
 /mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
 
-<i>Otomatik: 3 günde bir yeni parça, 15 günde bir 80–180 dk derleme.</i>
+<i>Otomatik: 3 günde bir yeni parça (temaya uygun klip kolajı: deniz, sonbahar, orman…), 15 günde bir
+80–180 dk derleme (şömine döngüsü). Yayın saati 08:00.</i>
 
 <b>🔥 Şömine</b>
 Bota şömine <b>videosu</b> (10–40 sn, en fazla 20 MB) ya da <b>fotoğrafı</b> gönderin: arka plan döngüsü olur.
@@ -463,6 +464,9 @@ class Bot:
                 lines.append(f"⚠️ ElevenLabs: anahtar var ama kredi okunamadı ({html.escape(str(e)[:150])})")
         else:
             lines.append("❌ ElevenLabs (müzik) – zorunlu")
+        if self.db.get_setting("daily_visual") == "collage":
+            lines.append(("✅ Pexels (temalı klip kolajı)" if CONFIG.pexels_api_key else
+                          "❌ Pexels – PEXELS_API_KEY yok; kısa videolarda şömineye geçilir"))
         if fire:
             lines.append("➖ Stability (görsel) – şömine modunda gerekmiyor")
         else:
@@ -694,6 +698,8 @@ class Bot:
 def validate_setting(key: str, value: str) -> str | None:
     if key == "compilation_fill":
         return None if value in ("repeat", "generate") else "repeat ya da generate olmalı"
+    if key == "daily_visual":
+        return None if value in ("collage", "fireplace", "image") else "collage, fireplace ya da image olmalı"
     if key.endswith("_time"):
         try:
             hh, mm = (int(x) for x in value.split(":"))
@@ -720,7 +726,7 @@ def validate_setting(key: str, value: str) -> str | None:
         return "1–14 gün arası olmalı"
     if key == "mix_reuse_pct" and not 0 <= n <= 80:
         return "0–80 arası olmalı"
-    if key == "fireplace" and n not in (0, 1):
+    if key in ("fireplace", "publish_roll") and n not in (0, 1):
         return "0 veya 1 olmalı"
     if key == "fire_volume" and not 0 <= n <= 100:
         return "0–100 arası olmalı"

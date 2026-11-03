@@ -225,3 +225,59 @@ def test_unused_tracks_become_videos_without_credits(pipe, monkeypatch):
     pipe._make_track_audio(tid2, 60)
     pipe.discard_track(tid2)
     assert pipe.unused_tracks() == []
+
+
+def test_publish_rolls_to_next_morning(tmp_path):
+    db = Database(tmp_path / "p.db")
+    p = Pipeline(db)
+    assert db.get_setting("publish_time") == "08:00"
+    noon = datetime(2026, 1, 5, 9, 0, tzinfo=timezone.utc)        # İstanbul 12:00
+    early = datetime(2026, 1, 5, 3, 0, tzinfo=timezone.utc)       # İstanbul 06:00
+    assert p.next_publish_at(noon) == datetime(2026, 1, 6, 5, 0, tzinfo=timezone.utc)
+    assert p.next_publish_at(early) == datetime(2026, 1, 5, 5, 0, tzinfo=timezone.utc)
+
+
+def test_theme_picking_prefers_style_and_avoids_repeats():
+    from app.themes import STYLE_THEMES, pick_theme
+    rng = random.Random(1)
+    picks = [pick_theme("rainy_romance_piano", ["rain", "autumn"], rng).key for _ in range(40)]
+    assert "rain" not in picks and "autumn" not in picks
+    assert sum(k in STYLE_THEMES["rainy_romance_piano"] for k in picks) > 10
+
+
+def test_daily_uses_theme_collage_and_short(pipe, monkeypatch, tmp_path):
+    import subprocess
+    from app import stock
+
+    def fake_fetch(theme, dest, used, rng):
+        dest.mkdir(parents=True, exist_ok=True)
+        items = []
+        for n in range(3):
+            pth = dest / f"v{n}.mp4"
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc2=size=640x360:rate=30:duration=10",
+                            "-pix_fmt", "yuv420p", str(pth)], check=True, capture_output=True)
+            items.append(stock.StockItem(f"v{n}", "video", pth))
+        img = dest / "p0.jpg"
+        from PIL import Image
+        Image.new("RGB", (800, 450), (200, 120, 60)).save(img)
+        items.append(stock.StockItem("p0", "photo", img))
+        return items
+
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch", fake_fetch)
+    monkeypatch.setattr(stock, "SEGMENT_SEC", 3.0)
+    monkeypatch.setattr(stock, "XFADE_SEC", 0.5)
+    db = pipe.db
+    vid = pipe.create_daily(ROMANTIC_STYLES[0].key)
+    v = db.video(vid)
+    t = db.track(v["track_id"])
+    assert t["theme"] and "Inspired by" in t["prompt"]
+    assert pipe._collage(vid) and pipe._collage(vid, "v")
+    assert pipe._background(vid) is None                   # kısa videoda şömine yok
+    assert "Footage: Pexels" in v["description"]
+    assert db.one("SELECT COUNT(*) n FROM stock_used")["n"] == 4
+    short = db.children(vid)[0]
+    from PIL import Image
+    assert Path(short["video_path"]).exists()
+    pipe.approve(vid)
+    assert pipe._collage(vid) is None                      # yüklendikten sonra kolaj silinir

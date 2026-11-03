@@ -315,11 +315,12 @@ def pick_style(recent_keys: list[str], avg_views: dict[str, float], rng: random.
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
-def build_music_prompt(style: Style, rng: random.Random | None = None) -> str:
+def build_music_prompt(style: Style, rng: random.Random | None = None, theme=None) -> str:
     rng = rng or random.Random()
     bpm = rng.randint(*style.bpm)
     return (
         f"Instrumental {style.base}. Featuring {rng.choice(style.instruments)}. "
+        + (f"Inspired by {theme.music_hint}. " if theme else "") +
         f"Mood: {rng.choice(style.moods)}. {bpm} BPM, in {rng.choice(KEYS)}. "
         f"{profiles.current().music_purpose} "
         "No vocals, no lyrics. Clean, warm, professional mix."

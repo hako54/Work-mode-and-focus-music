@@ -31,7 +31,7 @@ def _client() -> anthropic.Anthropic | None:
 
 
 def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_titles: list[str],
-             extra: str = "") -> VideoMeta:
+             extra: str = "", theme_label: str = "") -> VideoMeta:
     client = _client()
     if client:
         minutes = round(duration_sec / 60)
@@ -59,14 +59,21 @@ def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_ti
             log.warning("Claude meta üretmedi (stop_reason=%s), şablona geçiliyor", resp.stop_reason)
         except anthropic.APIError as e:
             log.warning("Claude API hatası: %s — şablona geçiliyor", e)
-    return fallback(kind, style, duration_sec, scene=scene)
+    return fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label)
 
 
 def fallback(kind: str, style: Style, duration_sec: float, rng: random.Random | None = None,
-             scene: str = "") -> VideoMeta:
+             scene: str = "", theme_label: str = "") -> VideoMeta:
     rng = rng or random.Random()
     if profiles.current().key == "romantic":
-        return _fallback_romantic(kind, style, duration_sec, rng, fire="fireplace" in scene)
+        meta = _fallback_romantic(kind, style, duration_sec, rng, fire="fireplace" in scene)
+        if theme_label and kind == "daily":
+            meta = meta.model_copy(update={"title": rng.choice([
+                f"{theme_label} Romance 🎹 Soft {style.label} for Love & Relaxation",
+                f"Romantic Piano • {theme_label} — Tender {style.label} to Relax & Unwind",
+                f"{theme_label} & Love 💕 Calm {style.label} for a Peaceful Moment",
+            ])})
+        return meta
     minutes = round(duration_sec / 60)
     if kind in ("compilation", "mix"):
         title = rng.choice([

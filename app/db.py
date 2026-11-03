@@ -57,6 +57,12 @@ CREATE TABLE IF NOT EXISTS compilation_tracks (
     PRIMARY KEY (video_id, position)
 );
 
+CREATE TABLE IF NOT EXISTS stock_used (
+    provider_id TEXT PRIMARY KEY,          -- Pexels "v123" / "p456": aynı klip tekrar kullanılmasın
+    theme TEXT,
+    used_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -84,6 +90,9 @@ class Database:
         self._lock = threading.RLock()
         with self.tx() as c:
             c.executescript(SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(tracks)")}
+            if "theme" not in cols:  # eski veritabanları için
+                c.execute("ALTER TABLE tracks ADD COLUMN theme TEXT")
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

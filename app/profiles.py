@@ -35,6 +35,8 @@ SETTING_HELP: dict[str, str] = {
     "compilation_min_min": "Derleme en kısa süre (dk)",
     "compilation_max_min": "Derleme en uzun süre (dk)",
     "daily_every_days": "Kaç günde bir yeni parça videosu üretilsin",
+    "publish_roll": "Yayın saati geçtiyse ertesi güne zamanla (1/0; 0 = hemen yayınla)",
+    "daily_visual": "Kısa videoların görüntüsü: collage (temaya uygun klipler) | fireplace | image",
     "compilation_fill": "Derleme kısa kalırsa: repeat = parçaları tekrarla (kredisiz), generate = yeni parça üret",
     "mix_every_days": "Kaç günde bir uzun mix üretilsin",
     "mix_min_min": "Mix en kısa süre (dk; 80 = 1 sa 20 dk)",
@@ -136,6 +138,9 @@ Do not add hashtags; they are appended separately.""",
     ),
     extra_settings={
         "daily_every_days": "3",
+        "publish_time": "08:00",
+        "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
+        "daily_visual": "collage",    # kısa videolar: collage | fireplace | image
         "daily_min_sec": "270",
         "daily_max_sec": "330",
         "compilation_every_days": "15",
