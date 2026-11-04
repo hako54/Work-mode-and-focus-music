@@ -91,7 +91,10 @@ class Bot:
         self.pipe = Pipeline(db)
         self.tz = ZoneInfo(CONFIG.timezone)
         self.busy = asyncio.Lock()
-        self.app = Application.builder().token(CONFIG.telegram_token).post_init(self._post_init).build()
+        # concurrent_updates: uzun süren bir komut (ör. /arkaplan yenile) diğer komutları bekletmesin;
+        # ağır işler yine self.busy kilidiyle sırayla çalışır.
+        self.app = (Application.builder().token(CONFIG.telegram_token).post_init(self._post_init)
+                    .concurrent_updates(True).build())
         self.loop: asyncio.AbstractEventLoop | None = None
         self._register()
 
@@ -117,7 +120,18 @@ class Bot:
         self.app.add_handler(CallbackQueryHandler(self.on_button))
         # Yetkisiz kullanıcıya kendi ID'sini söyle (ilk kurulum için).
         self.app.add_handler(CommandHandler("start", self.cmd_whoami, filters=~admin))
+        self.app.add_handler(MessageHandler(filters.ALL, self._log_update), group=-1)
+        self.app.add_handler(CallbackQueryHandler(self._log_update), group=-1)
         self.app.add_error_handler(self.on_error)
+
+    async def _log_update(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Gelen her mesaj/düğme loglanır (komut bota ulaştı mı, Railway loglarından görülebilsin)."""
+        if update.callback_query:
+            log.info("Düğme: %s (kullanıcı %s)", update.callback_query.data, update.effective_user.id)
+        elif update.message:
+            kind = "metin" if update.message.text else "medya"
+            log.info("Mesaj (%s): %s (kullanıcı %s)", kind, (update.message.text or "")[:120],
+                     update.effective_user.id if update.effective_user else "?")
 
     async def on_error(self, update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         log.error("Telegram işleyici hatası", exc_info=ctx.error)
