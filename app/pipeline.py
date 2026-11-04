@@ -265,10 +265,12 @@ class Pipeline:
                 return False
             shorts = self.db.get_setting("make_shorts") == "1"
             if item.kind == "video":
-                fireplace.seamless_video_loop(item.path, d / "collage.mp4", (1920, 1080), max_seconds=30, xfade=2.0)
+                src = stock.slow_down(item, d / "slow.mp4", max_out=40)  # sakin: ağır çekim
+                fireplace.seamless_video_loop(src, d / "collage.mp4", (1920, 1080), max_seconds=40, xfade=3.0)
                 if shorts:
-                    fireplace.seamless_video_loop(item.path, d / "collage_v.mp4", (1080, 1920), max_seconds=30,
-                                                  xfade=2.0)
+                    fireplace.seamless_video_loop(src, d / "collage_v.mp4", (1080, 1920), max_seconds=40,
+                                                  xfade=3.0)
+                src.unlink(missing_ok=True)
             else:
                 media.make_loop(item.path, d / "collage.mp4")
                 if shorts:

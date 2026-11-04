@@ -21,10 +21,13 @@ from .themes import Theme
 log = logging.getLogger(__name__)
 
 API = "https://api.pexels.com"
-SEGMENT_SEC = 8.0      # kolajdaki her klip/fotoğrafın süresi
-XFADE_SEC = 1.5        # aralarındaki yumuşak geçiş
-N_VIDEOS = 8
-N_PHOTOS = 3
+SEGMENT_SEC = 14.0     # kolajdaki her klip/fotoğrafın süresi (sakin: uzun sahneler)
+XFADE_SEC = 3.0        # aralarındaki yumuşak geçiş
+N_VIDEOS = 5
+N_PHOTOS = 2
+SLOW_DEFAULT = 1.25    # 24-30 fps kliplerde hafif ağır çekim
+SLOW_MAX = 2.0         # 50-60 fps kliplerde akıcı 2x ağır çekim
+NO_SPEEDUP = ("timelapse", "time lapse", "hyperlapse", "fast motion", "speed")
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,7 @@ class StockItem:
     provider_id: str   # "v123" / "p456"
     kind: str          # video | photo
     path: Path
+    slow: float = 1.0  # ağır çekim katsayısı (2.0 = yarı hız)
 
 
 def available() -> bool:
@@ -58,8 +62,20 @@ def _best_file(files: list[dict]) -> dict | None:
     landscape = [f for f in mp4 if f["width"] >= f["height"]] or mp4
     if not landscape:
         return None
-    # 1920 genişliğe en yakın (çok büyük 4K dosyaları gereksiz indirmeyelim)
-    return min(landscape, key=lambda f: (abs(f["width"] - 1920), -f["width"]))
+    # 1920 genişliğe yakın (4K gereksiz) ve mümkünse 50-60 fps (akıcı ağır çekim için)
+    return min(landscape, key=lambda f: (abs(f["width"] - 1920) // 400, -(f.get("fps") or 30), -f["width"]))
+
+
+def slow_factor(f: dict) -> float:
+    """60 fps klip 2x ağır çekime akıcı dayanır; 24-30 fps klipler hafifçe yavaşlatılır."""
+    fps = float(f.get("fps") or 30)
+    return min(SLOW_MAX, round(fps / media.FPS, 1)) if fps >= 45 else SLOW_DEFAULT
+
+
+def _calm(v: dict) -> bool:
+    """Hızlandırılmış (timelapse vb.) klipleri ele."""
+    text = " ".join(str(v.get(k, "")) for k in ("url", "tags")).lower()
+    return not any(w in text for w in NO_SPEEDUP)
 
 
 def fetch(theme: Theme, dest: Path, used: set[str], rng: random.Random) -> list[StockItem]:
@@ -73,8 +89,8 @@ def fetch(theme: Theme, dest: Path, used: set[str], rng: random.Random) -> list[
         for q in rng.sample(list(theme.video_queries), len(theme.video_queries)):
             res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 15,
                                           "size": "medium"})
-            vids += [v for v in res.get("videos", []) if v.get("duration", 0) >= SEGMENT_SEC + 1
-                     and f"v{v['id']}" not in used]
+            vids += [v for v in res.get("videos", []) if v.get("duration", 0) >= SEGMENT_SEC / SLOW_DEFAULT + 1
+                     and f"v{v['id']}" not in used and _calm(v)]
         rng.shuffle(vids)
         seen: set[str] = set()
         for v in vids:
@@ -86,7 +102,7 @@ def fetch(theme: Theme, dest: Path, used: set[str], rng: random.Random) -> list[
                 continue
             seen.add(pid)
             try:
-                items.append(StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4")))
+                items.append(StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"), slow_factor(f)))
             except requests.RequestException as e:
                 log.warning("Pexels video indirilemedi (%s): %s", pid, e)
         photos: list[dict] = []
@@ -116,12 +132,13 @@ def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: rando
     try:
         for q in queries:  # önce en uygun arama
             res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 15, "size": "medium"})
-            vids = [v for v in res.get("videos", []) if v.get("duration", 0) >= 12 and f"v{v['id']}" not in used]
+            vids = [v for v in res.get("videos", []) if v.get("duration", 0) >= 12 and f"v{v['id']}" not in used
+                    and _calm(v)]
             for v in rng.sample(vids[:6], min(6, len(vids))):  # en alakalı ilk sonuçlardan biri
                 f = _best_file(v.get("video_files", []))
                 if f:
                     pid = f"v{v['id']}"
-                    return StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"))
+                    return StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"), slow_factor(f))
         for q in queries:
             res = _get("/v1/search", {"query": q, "orientation": "landscape", "per_page": 15})
             photos = [p for p in res.get("photos", []) if f"p{p['id']}" not in used]
@@ -140,19 +157,32 @@ def _segment(item: StockItem, out: Path, size: tuple[int, int]) -> Path:
     frames = int(SEGMENT_SEC * media.FPS)
     if item.kind == "video":
         dur = media.duration(item.path)
-        start = max(0.0, (dur - SEGMENT_SEC) / 2)
-        vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={media.FPS},"
-              "format=yuv420p,setsar=1")
-        media.run(["ffmpeg", "-y", "-ss", f"{start:.2f}", "-t", f"{SEGMENT_SEC:.2f}", "-i", str(item.path),
+        slow = max(1.0, min(item.slow, dur / (SEGMENT_SEC + 0.5)))  # kısa klipte süre yetmezse daha az yavaşlat
+        src_len = SEGMENT_SEC / slow
+        start = max(0.0, (dur - src_len) / 2)
+        vf = (f"setpts={slow:.4f}*PTS,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+              f"fps={media.FPS},format=yuv420p,setsar=1")
+        media.run(["ffmpeg", "-y", "-ss", f"{start:.2f}", "-t", f"{src_len + 0.5:.2f}", "-i", str(item.path),
                    "-vf", vf, "-an", "-frames:v", str(frames), "-c:v", "libx264", "-preset", "veryfast",
                    "-crf", "20", str(out)])
     else:  # fotoğraf: yavaş Ken Burns yakınlaşması
         vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
-              f"zoompan=z='1.0+0.06*on/{frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:"
+              f"zoompan=z='1.0+0.04*on/{frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:"
               f"s={w}x{h}:fps={media.FPS},format=yuv420p,setsar=1")
         media.run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(media.FPS), "-t", f"{SEGMENT_SEC:.2f}",
                    "-i", str(item.path), "-vf", vf, "-frames:v", str(frames), "-c:v", "libx264",
                    "-preset", "veryfast", "-crf", "20", str(out)])
+    return out
+
+
+def slow_down(item: StockItem, out: Path, max_out: float = 40.0) -> Path:
+    """Tek sahne klibini ağır çekime al (setpts); en fazla max_out saniyelik çıktı."""
+    dur = media.duration(item.path)
+    slow = max(1.0, item.slow)
+    src_len = min(dur, max_out / slow)
+    media.run(["ffmpeg", "-y", "-t", f"{src_len:.2f}", "-i", str(item.path),
+               "-vf", f"setpts={slow:.4f}*PTS,fps={media.FPS},format=yuv420p", "-an",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(out)])
     return out
 
 

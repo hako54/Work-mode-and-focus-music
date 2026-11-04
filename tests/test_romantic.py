@@ -455,3 +455,25 @@ def test_compilations_are_per_series(pipe):
     pipe.reject(cid)
     cid2 = pipe.create_compilation()
     assert db.video(cid2)["series"] == "sleep"          # sonraki derleme diğer seriye geçer
+
+
+def test_calm_stock_selection_and_slow_motion(tmp_path):
+    import subprocess
+    from app import stock
+    files = [{"file_type": "video/mp4", "width": 1920, "height": 1080, "fps": 29.97, "link": "a"},
+             {"file_type": "video/mp4", "width": 1920, "height": 1080, "fps": 59.94, "link": "b"},
+             {"file_type": "video/mp4", "width": 3840, "height": 2160, "fps": 59.94, "link": "c"}]
+    best = stock._best_file(files)
+    assert best["link"] == "b"                                  # 1080p 60 fps tercih edilir
+    assert stock.slow_factor(best) == 2.0 and stock.slow_factor(files[0]) == stock.SLOW_DEFAULT
+    assert not stock._calm({"url": "https://www.pexels.com/video/sunset-timelapse-123/"})
+    assert stock._calm({"url": "https://www.pexels.com/video/ocean-waves-slow-motion-9/"})
+
+    src = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=60:duration=20",
+                    "-pix_fmt", "yuv420p", str(src)], check=True, capture_output=True)
+    seg = stock._segment(stock.StockItem("v1", "video", src, 2.0), tmp_path / "seg.mp4", (640, 360))
+    assert media.duration(seg) == pytest.approx(stock.SEGMENT_SEC, abs=0.2)  # 7 sn kaynak -> 14 sn ağır çekim
+    slow = stock.slow_down(stock.StockItem("v1", "video", src, 2.0), tmp_path / "slow.mp4", max_out=30)
+    assert media.duration(slow) == pytest.approx(30, abs=0.3)                # 15 sn kaynak -> 30 sn
+    assert stock.SEGMENT_SEC >= 12 and stock.XFADE_SEC >= 2.5
