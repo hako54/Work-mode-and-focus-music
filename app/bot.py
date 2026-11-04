@@ -36,27 +36,32 @@ HELP_PRODUCTION = {
 /uret [stil] – şimdi günlük video üret
 /derleme – şimdi uzun derleme üret
 """,
-    "romantic": """<b>💕 Romantic Piano Otomasyonu</b>
+    "romantic": """<b>💕 Evermore Romance Piano – Komutlar</b>
 
-<b>Üretim</b>
-/uret [seri] [tema] [sahne|kolaj] – istediğin an yeni ~5 dk parça + Short (ör. /uret jazz kafe sahne); takvimi kaydırmaz
-/seriler – 💕 Romance · ☕ Cozy Jazz · 😴 Sleep · 🍃 Relaxing (otomatik üretim sırayla döner)
-/temalar – temalar (deniz, sonbahar, orman, yağmur, kar…)
-/kullanilan – yayınlanmış parçalar, en çok izlenenden aza (👁 ❤️, derleme sayısı, link)
+<i>Otomatik: 3 günde bir ~5 dk parça + Short (💕→☕→😴→🍃 sırayla), 15 günde bir 80–180 dk derleme
+(şömine). Yayın 08:00. Her video onayınıza gelir.</i>
+
+<b>🎵 Üretim</b>
+/uret [seri] [tema] [sahne|kolaj] – yeni parça + Short (kredi harcar; takvimi kaydırmaz)
+   ör. /uret jazz kafe sahne · /uret uyku yagmur · /uret sonbahar
+/derleme [seri] – en çok dinlenenlerden uzun video (kredisiz)
+/mix [dk] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
+
+<b>🎧 Parçalar</b>
+/parcalar – kullanılmamış parçaları dinle → Video yap / Sil (kredisiz)
+/kullanilan – yayınlananlar, en çok izlenenden aza
 /dinle &lt;#no&gt; – bir parçayı tekrar dinle
-/derleme [seri] – şimdi bir serinin en çok dinlenenlerinden uzun derleme (kredi harcamaz)
-/parcalar – üretilmiş ama kullanılmamış parçaları dinle, beğendiklerini videoya çevir (kredisiz)
-/mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
 
-<i>Otomatik: 3 günde bir yeni parça (temaya uygun klip kolajı: deniz, sonbahar, orman…), 15 günde bir
-80–180 dk derleme (şömine döngüsü). Yayın saati 08:00.</i>
+<b>🗂 Seçenekler</b>
+/seriler · /temalar · /stiller · /stil &lt;anahtar&gt; ac|kapat
 
-<b>🔥 Şömine</b>
-Bota şömine <b>videosu</b> (10–40 sn, en fazla 20 MB) ya da <b>fotoğrafı</b> gönderin: arka plan döngüsü olur.
-Videonun kendi ateş sesi varsa çıtırtı olarak o kullanılır.
-/video &lt;link&gt; [link2 …] – büyük (4K, 300 MB+) videoları linkle ekle; 1080p'ye küçültülür
-/arkaplan – arka planları listele · /arkaplan sil &lt;ad&gt;
-/ayar fireplace 0|1 · /ayar fire_volume 0–100
+<b>🔥 Arka plan (şömine)</b>
+Bota video/fotoğraf gönder (en fazla 20 MB)
+/video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
+/arkaplan · /arkaplan sil &lt;ad&gt;
+
+<b>✅ Onay</b>
+Kartta: ✅ Onayla (08:00) · ⚡ Hemen yayınla · ❌ Reddet · 🎵 Müzik / 🖼 Görsel / ✏️ Metin yenile
 """,
 }
 
