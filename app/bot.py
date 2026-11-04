@@ -114,6 +114,11 @@ class Bot:
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
+        self._cmds = cmds
+        # Kopyala-yapıştırla "kod" biçiminde gelen komutlarda Telegram /komut'u işaretlemez;
+        # bunları metinden çözüp aynı komuta yönlendir.
+        self.app.add_handler(MessageHandler(admin & filters.TEXT & filters.Regex(r"^\s*/[A-Za-z_]+")
+                                            & ~filters.COMMAND, self.on_text_command))
         media_filter = (filters.VIDEO | filters.PHOTO | filters.ANIMATION | filters.Document.VIDEO
                         | filters.Document.IMAGE)
         self.app.add_handler(MessageHandler(admin & media_filter, self.on_media))
@@ -123,6 +128,18 @@ class Bot:
         self.app.add_handler(MessageHandler(filters.ALL, self._log_update), group=-1)
         self.app.add_handler(CallbackQueryHandler(self._log_update), group=-1)
         self.app.add_error_handler(self.on_error)
+
+    async def on_text_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Biçimlendirilmiş (kod/kalın) metin olarak gelen '/komut arg…' mesajlarını çalıştır."""
+        words = update.message.text.split()
+        name = words[0].lstrip("/").split("@")[0].lower()
+        fn = self._cmds.get(name)
+        if not fn:
+            await update.message.reply_text(f"Bilinmeyen komut: /{name} · /yardim")
+            return
+        log.info("Biçimli metinden komut çözüldü: /%s", name)
+        ctx.args = words[1:]
+        await fn(update, ctx)
 
     async def _log_update(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Gelen her mesaj/düğme loglanır (komut bota ulaştı mı, Railway loglarından görülebilsin)."""
