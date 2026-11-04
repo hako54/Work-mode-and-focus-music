@@ -477,3 +477,29 @@ def test_calm_stock_selection_and_slow_motion(tmp_path):
     slow = stock.slow_down(stock.StockItem("v1", "video", src, 2.0), tmp_path / "slow.mp4", max_out=30)
     assert media.duration(slow) == pytest.approx(30, abs=0.3)                # 15 sn kaynak -> 30 sn
     assert stock.SEGMENT_SEC >= 12 and stock.XFADE_SEC >= 2.5
+
+
+def test_card_video_previews_follow_regenerated_visuals(pipe):
+    import asyncio
+    import os
+    import time
+    from app.bot import Bot
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    vid = pipe.create_daily(ROMANTIC_STYLES[0].key)
+    v = db.video(vid)
+    shorts = [c for c in db.children(vid) if c["status"] == "pending"]
+
+    bot = Bot.__new__(Bot)  # Telegram'a bağlanmadan yalnızca önizleme mantığını dene
+    bot.db, bot.pipe = db, pipe
+    previews = asyncio.run(bot._video_previews(v, shorts))
+    assert [label[0] for _, label in previews] == ["🎬", "📱"]
+    main_prev = previews[0][0]
+    assert media.duration(main_prev) <= 20.5 and main_prev.stat().st_size < 5_000_000
+    first_mtime = main_prev.stat().st_mtime
+
+    time.sleep(1.1)
+    pipe.regenerate(vid, "image")                       # 🖼 Görsel: video yeniden render edilir
+    v = db.video(vid)
+    previews = asyncio.run(bot._video_previews(v, [c for c in db.children(vid) if c["status"] == "pending"]))
+    assert previews[0][0].stat().st_mtime > first_mtime  # önizleme de yenilendi

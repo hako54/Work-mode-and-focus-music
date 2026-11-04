@@ -13,7 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import fireplace, metadata, profiles
+from . import fireplace, media, metadata, profiles
 from .config import CONFIG
 from .db import Database, parse_iso, utcnow
 from .media import fmt_ts
@@ -201,7 +201,12 @@ class Bot:
         elif v["preview_path"]:
             dur = self._comp_duration(vid)
         pub = self.pipe.next_publish_at()
-        when = pub.astimezone(self.tz).strftime("bugün %H:%M") if pub else "onaylanınca hemen"
+        if pub:
+            local_pub = pub.astimezone(self.tz)
+            day = "bugün" if local_pub.date() == datetime.now(self.tz).date() else "yarın"
+            when = f"{day} {local_pub:%H:%M}"
+        else:
+            when = "onaylanınca hemen"
         shorts = [c for c in self.db.children(vid) if c["status"] == "pending"]
         desc = (v["description"] or "")[:420]
         caption = (
@@ -216,11 +221,34 @@ class Bot:
                     await self.app.bot.send_photo(uid, f, caption=caption, parse_mode=ParseMode.HTML)
             else:
                 await self.app.bot.send_message(uid, caption, parse_mode=ParseMode.HTML)
+            for path, caption_v in await self._video_previews(v, shorts):  # görüntüyü görmeden karar verilmesin
+                with open(path, "rb") as f:
+                    await self.app.bot.send_video(uid, f, caption=caption_v, supports_streaming=True,
+                                                  read_timeout=120, write_timeout=120)
             if v["preview_path"] and Path(v["preview_path"]).exists():
                 with open(v["preview_path"], "rb") as f:
                     await self.app.bot.send_audio(uid, f, title=v["title"] or "preview", performer=profiles.channel_name(),
                                                   read_timeout=120, write_timeout=120)
             await self.app.bot.send_message(uid, f"#{vid} için karar:", reply_markup=self._keyboard(vid, v["kind"]))
+
+    async def _video_previews(self, v, shorts) -> list[tuple[Path, str]]:
+        """Ana video (~20 sn) ve Short (~15 sn) için küçük önizlemeler; hata olursa kart yine gider."""
+        out = []
+        jobs = []
+        if v["video_path"] and Path(v["video_path"]).exists():
+            start = 8.0 if v["kind"] == "daily" else 30.0
+            jobs.append((Path(v["video_path"]), start, 20.0, 480, "🎬 Görüntü önizlemesi (20 sn)"))
+        for c in shorts[:1]:
+            if c["video_path"] and Path(c["video_path"]).exists():
+                jobs.append((Path(c["video_path"]), 0.0, 15.0, 640, "📱 Short önizlemesi (15 sn)"))
+        for src, start, secs, height, label in jobs:
+            try:
+                p = await asyncio.to_thread(media.make_video_preview, src, src.parent / "preview.mp4",
+                                            start, secs, height)
+                out.append((p, label))
+            except Exception as e:  # noqa: BLE001
+                log.warning("Video önizlemesi hazırlanamadı (%s): %s", src, e)
+        return out
 
     def _comp_duration(self, vid: int) -> float:
         rows = self.db.query("SELECT ct.start_sec, t.duration_sec FROM compilation_tracks ct JOIN tracks t "

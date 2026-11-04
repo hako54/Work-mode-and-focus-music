@@ -104,6 +104,24 @@ def add_bed(src: Path, bed: Path, out: Path, volume: float, soft: bool = True) -
     return out
 
 
+def make_video_preview(video: Path, out: Path, start: float = 8.0, seconds: float = 20.0,
+                       height: int = 480) -> Path:
+    """Telegram onay kartı için kısa, küçük (sesli) video önizlemesi; video yeniden render edilince yenilenir."""
+    if out.exists() and out.stat().st_mtime >= video.stat().st_mtime:
+        return out
+    total = duration(video)
+    start = max(0.0, min(start, total - seconds)) if total > seconds else 0.0
+    tmp = out.with_name(out.stem + ".part.mp4")
+    try:
+        run(["ffmpeg", "-y", "-ss", f"{start:.2f}", "-t", f"{seconds:.2f}", "-i", str(video),
+             "-vf", f"scale=-2:{height}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(tmp)])
+        tmp.replace(out)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return out
+
+
 def make_preview(src: Path, out: Path, max_seconds: float | None = None) -> Path:
     """Telegram'a gönderilecek düşük boyutlu önizleme (bot limiti 50 MB)."""
     cmd = ["ffmpeg", "-y", "-i", str(src)]

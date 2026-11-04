@@ -975,8 +975,10 @@ class Pipeline:
             Path(row["video_path"]).unlink(missing_ok=True)
         if row["kind"] == "short":
             shutil.rmtree(CONFIG.media_dir / f"video_{row['id']}", ignore_errors=True)
+        if row["kind"] in LONG_KINDS:
+            (CONFIG.media_dir / f"video_{row['id']}" / "preview.mp4").unlink(missing_ok=True)
         if row["kind"] == "daily":
-            for f in ("collage.mp4", "collage_v.mp4", "audio.mp3"):
+            for f in ("collage.mp4", "collage_v.mp4", "audio.mp3", "preview.mp4"):
                 (CONFIG.media_dir / f"video_{row['id']}" / f).unlink(missing_ok=True)
         if row["kind"] in LONG_KINDS:
             (CONFIG.media_dir / f"video_{row['id']}" / "mix.mp3").unlink(missing_ok=True)
