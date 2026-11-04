@@ -44,11 +44,12 @@ def test_defaults_short_tracks_and_long_compilations(tmp_path):
 
 
 def test_styles_and_prompts_are_romantic_piano():
+    from app.series import SERIES_BY_KEY
     assert active_styles() == ROMANTIC_STYLES
     rng = random.Random(2)
     s = pick_style([], {}, rng)
     assert s in ROMANTIC_STYLES
-    for st in ROMANTIC_STYLES:
+    for st in [x for x in ROMANTIC_STYLES if x.key in SERIES_BY_KEY["romance"].styles]:
         p = build_music_prompt(st, rng)
         assert "piano" in p.lower() and "No vocals" in p and "romantic" in p.lower()
     assert "romantic" in build_image_prompt(ROMANTIC_STYLES[0], rng=rng).lower()
@@ -138,9 +139,11 @@ def test_reuse_respects_cap_and_prune(pipe):
 
 
 def test_prompts_are_soft_spa_style_without_bright_instruments():
+    from app.series import SERIES_BY_KEY
     rng = random.Random(5)
     bright = ("glockenspiel", "celesta", "bells", "harp", "bright grand")
-    for st in ROMANTIC_STYLES:
+    romance = [st for st in ROMANTIC_STYLES if st.key in SERIES_BY_KEY["romance"].styles]
+    for st in romance:
         assert st.bpm[1] <= 70
         assert not any(b in " ".join(st.instruments).lower() for b in bright)
         p = build_music_prompt(st, rng)
@@ -390,3 +393,65 @@ def test_short_links_to_full_video_and_follows_meta(pipe, monkeypatch):
     pipe.approve(vid)
     desc = db.video(short["id"])["description"]
     assert "🎧 Full song: https://youtu.be/yt1" in desc and pipe.FULL_LINK_TOKEN not in desc
+
+
+def test_every_series_has_valid_soft_styles_and_themes():
+    from app.series import SERIES
+    from app.styles import STYLE_BY_KEY
+    from app.themes import SCENES, THEME_BY_KEY
+    bright = ("glockenspiel", "celesta", "bells", "harp", "bright grand")
+    rng = random.Random(3)
+    for ser in SERIES:
+        assert ser.styles and ser.themes and len(ser.perfect_for) >= 8
+        for k in ser.styles:
+            st = STYLE_BY_KEY[k]
+            assert st.bpm[1] <= 86 and not any(b in " ".join(st.instruments).lower() for b in bright)
+            p = build_music_prompt(st, rng, purpose=ser.purpose)
+            assert "No vocals" in p and "No bright, thin, piercing" in p
+        for t in ser.themes:
+            assert t in THEME_BY_KEY and t in SCENES
+    sleep = next(s for s in SERIES if s.key == "sleep")
+    assert "no percussion" in sleep.purpose and all(STYLE_BY_KEY[k].bpm[1] <= 70 for k in sleep.styles)
+    assert "swing" in next(s for s in SERIES if s.key == "jazz").purpose
+
+
+def test_auto_videos_rotate_series_and_use_matching_styles(pipe):
+    from app.series import SERIES_BY_KEY, find_series
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    seen = []
+    for _ in range(5):
+        vid = pipe.create_daily(auto=True)
+        t = db.track(db.video(vid)["track_id"])
+        seen.append(t["series"])
+        ser = SERIES_BY_KEY[t["series"]]
+        assert t["style_key"] in ser.styles and t["theme"] in ser.themes
+        v = db.video(vid)
+        assert ser.genre in v["title"] and ser.hashtags in v["description"]
+    assert seen == ["romance", "jazz", "sleep", "relax", "romance"]
+    assert find_series("caz").key == "jazz" and find_series("uyku").key == "sleep"
+
+    manual = pipe.create_daily(series_key="sleep")
+    assert db.track(db.video(manual)["track_id"])["series"] == "sleep"
+    assert pipe.next_series().key == "jazz"  # elle üretim sırayı değiştirmez
+
+
+def test_compilations_are_per_series(pipe):
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    for key in ("jazz", "jazz", "sleep", "sleep", "sleep"):
+        vid = pipe.create_daily(series_key=key)
+        pipe.approve(vid)
+        db.update_video(vid, status="published", views=10)
+    db.set_setting("compilation_min_min", "1")
+    db.set_setting("compilation_max_min", "1")
+    cid = pipe.create_compilation()
+    c = db.video(cid)
+    assert c["series"] == "jazz"                      # sıradaki (romance'ın 2 parçası yok) -> jazz
+    rows = db.query("SELECT t.series FROM compilation_tracks ct JOIN tracks t ON t.id = ct.track_id "
+                    "WHERE ct.video_id = ?", (cid,))
+    assert {r["series"] for r in rows} == {"jazz"}
+    assert "Cozy Jazz Music" in c["title"] and "#CozyJazz" in c["description"]
+    pipe.reject(cid)
+    cid2 = pipe.create_compilation()
+    assert db.video(cid2)["series"] == "sleep"          # sonraki derleme diğer seriye geçer

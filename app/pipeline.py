@@ -11,6 +11,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from . import fireplace, media, metadata, profiles, stock, visuals
+from . import series as series_mod
 from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
@@ -67,21 +68,27 @@ class Pipeline:
 
     # ------------------------------------------------------------------ daily
     def create_daily(self, style_key: str | None = None, progress: Progress = _noop,
-                     theme_key: str | None = None, auto: bool = False, visual: str | None = None) -> int:
+                     theme_key: str | None = None, auto: bool = False, visual: str | None = None,
+                     series_key: str | None = None) -> int:
         rng = random.Random()
+        romantic = profiles.current().key == "romantic"
+        ser = None
+        if romantic:  # seri: elle seçilen > stilin serisi > sıradaki seri (romance → jazz → sleep → relax)
+            ser = (series_mod.get(series_key) if series_key else
+                   series_mod.of_style(style_key) if style_key else self.next_series())
         recent = [r["style_key"] for r in self.db.query(
             "SELECT style_key FROM videos WHERE kind = 'daily' ORDER BY id DESC LIMIT 5")]
         style = STYLE_BY_KEY[style_key] if style_key else pick_style(
-            recent, self.style_performance(), rng, self.disabled_styles())
+            recent, self.style_performance(), rng, self.disabled_styles(), only=ser.styles if ser else None)
         lo, hi = self.db.get_int("daily_min_sec"), self.db.get_int("daily_max_sec")
         duration = rng.randint(lo, hi)
 
-        theme = THEME_BY_KEY.get(theme_key or "") or (
-            self._pick_theme(style, rng) if profiles.current().key == "romantic" else None)
-        track_id = self.db.add_track(style_key=style.key, prompt=build_music_prompt(style, rng, theme),
-                                     theme=theme.key if theme else None)
+        theme = THEME_BY_KEY.get(theme_key or "") or (self._pick_theme(style, rng, ser) if romantic else None)
+        track_id = self.db.add_track(style_key=style.key,
+                                     prompt=build_music_prompt(style, rng, theme, purpose=ser.purpose if ser else ""),
+                                     theme=theme.key if theme else None, series=ser.key if ser else None)
         video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building",
-                                     source="auto" if auto else "manual")
+                                     source="auto" if auto else "manual", series=ser.key if ser else None)
         try:
             progress(f"🎵 Müzik üretiliyor: {style.label}" + (f" · {theme.emoji} {theme.label}" if theme else "")
                      + f" (~{duration // 60} dk {duration % 60} sn)")
@@ -134,10 +141,13 @@ class Pipeline:
         rng = random.Random()
         t = self.db.track(track_id)
         style = STYLE_BY_KEY.get(t["style_key"], active_styles()[0])
+        ser = self.track_series(t)
         if not t["theme"] and profiles.current().key == "romantic":
-            self.db.update_track(track_id, theme=self._pick_theme(style, rng).key)
+            self.db.update_track(track_id, theme=self._pick_theme(style, rng, ser).key)
+        if not t["series"]:
+            self.db.update_track(track_id, series=ser.key)
         video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building",
-                                     source="manual")
+                                     source="manual", series=ser.key)
         try:
             scene = self._daily_visuals(video_id, style, rng, progress)
             progress("✍️ Başlık ve açıklama yazılıyor")
@@ -177,10 +187,22 @@ class Pipeline:
 
     FIRE_SCENE = "a cozy wood fireplace burning at night, warm flickering flames and glowing embers"
 
-    def _pick_theme(self, style: Style, rng: random.Random) -> Theme:
+    def _pick_theme(self, style: Style, rng: random.Random, ser=None) -> Theme:
         recent = [r["theme"] for r in self.db.query(
             "SELECT theme FROM tracks WHERE theme IS NOT NULL ORDER BY id DESC LIMIT 5")]
-        return pick_theme(style.key, recent, rng)
+        return pick_theme(style.key, recent, rng, allowed=ser.themes if ser else None)
+
+    def next_series(self):
+        """Otomatik sıradaki seri: son otomatik parçanın serisinden sonraki (ilk kez: romance)."""
+        last = self.db.one("SELECT COALESCE(t.series, '') s, t.style_key FROM videos v JOIN tracks t "
+                           "ON t.id = v.track_id WHERE v.kind = 'daily' AND COALESCE(v.source, 'auto') = 'auto' "
+                           "AND v.status NOT IN ('rejected', 'failed') ORDER BY v.id DESC LIMIT 1")
+        if not last:
+            return series_mod.SERIES[0]
+        return series_mod.next_after(last["s"] or series_mod.of_style(last["style_key"]).key)
+
+    def track_series(self, track) -> "series_mod.Series":
+        return series_mod.get(track["series"]) if track["series"] else series_mod.of_style(track["style_key"])
 
     def _theme_of(self, video_id: int) -> Theme | None:
         v = self.db.video(video_id)
@@ -321,14 +343,17 @@ class Pipeline:
         v = self.db.video(video_id)
         t = self.db.track(v["track_id"])
         theme = THEME_BY_KEY.get(t["theme"] or "")
+        romantic = profiles.current().key == "romantic"
+        ser = self.track_series(t) if romantic else None
         meta = metadata.generate("daily", style, t["duration_sec"], scene, self.recent_titles(),
                                  extra=(f"Theme of this track: {EN_LABEL[theme.key]}." if theme else ""),
                                  theme_label=EN_LABEL[theme.key] if theme else "",
-                                 theme_key=theme.key if theme else "")
+                                 theme_key=theme.key if theme else "", series_key=ser.key if ser else "")
         self.db.update_track(t["id"], name=meta.track_name)
         credits = stock.credits_line() if self._collage(video_id) else ""
         self.db.update_video(video_id, title=meta.title,
-                             description=metadata.full_description(meta.description, extra_links=credits),
+                             description=metadata.full_description(meta.description, extra_links=credits,
+                                                                   hashtags=ser.hashtags if ser else ""),
                              tags=meta.tags, thumbnail_text=meta.thumbnail_text)
         self._refresh_short_text(video_id)
 
@@ -415,8 +440,9 @@ class Pipeline:
             body = (f"{track_name} — {metadata.shorten(first, 280)}" if track_name else metadata.shorten(first, 300))
             what = f"🎧 Full {length} mix: " if length else "🎧 Full song: "
             credits = stock.credits_line() if self._collage(parent_id) else ""
-            desc = metadata.full_description(f"{body}\n\n{what}{self.FULL_LINK_TOKEN}", extra_links=credits)
-            desc = desc.replace(profiles.current().hashtags, "#Shorts " + profiles.current().hashtags)
+            tags = (series_mod.get(parent["series"]).hashtags if parent["series"] else profiles.current().hashtags)
+            desc = metadata.full_description(f"{body}\n\n{what}{self.FULL_LINK_TOKEN}", extra_links=credits,
+                                             hashtags="#Shorts " + tags)
             self.db.update_video(short["id"], title=title, description=desc)
 
     # --------------------------------------------------------------- regenerate
@@ -454,8 +480,28 @@ class Pipeline:
             self._make_short(video_id)
 
     # --------------------------------------------------------------- compilation
-    def select_compilation_tracks(self, now: datetime | None = None) -> list[dict]:
-        """En çok dinlenen parçaları seç, sonra kulağa akıcı gelecek sırayla diz."""
+    def compilation_series(self, requested: str | None = None) -> str | None:
+        """Derlemenin serisi: istenen ya da sıradaki (en az 2 yayınlanmış parçası olan) seri."""
+        if profiles.current().key != "romantic":
+            return None
+        if requested:
+            return requested
+        counts: dict[str, int] = {}
+        for r in self.db.query("SELECT t.series, t.style_key FROM tracks t JOIN videos v ON v.track_id = t.id "
+                               "AND v.kind = 'daily' AND v.status IN ('published', 'scheduled') "
+                               "WHERE t.audio_path IS NOT NULL"):
+            key = r["series"] or series_mod.of_style(r["style_key"]).key
+            counts[key] = counts.get(key, 0) + 1
+        start = series_mod.next_after(self.db.get_setting("last_compilation_series") or None)
+        order = list(series_mod.ORDER)
+        i = order.index(start.key)
+        for key in order[i:] + order[:i]:
+            if counts.get(key, 0) >= 2:
+                return key
+        return max(counts, key=counts.get) if counts else None
+
+    def select_compilation_tracks(self, now: datetime | None = None, series_key: str | None = None) -> list[dict]:
+        """En çok dinlenen parçaları seç, sonra kulağa akıcı gelecek sırayla diz (series_key: yalnızca o seri)."""
         now = now or utcnow()
         every = self.db.get_int("compilation_every_days")
         max_sec = self.db.get_int("compilation_max_min") * 60
@@ -471,6 +517,8 @@ class Pipeline:
         scored = []
         for r in rows:
             if not Path(r["audio_path"]).exists():
+                continue
+            if series_key and (r["series"] or series_mod.of_style(r["style_key"]).key) != series_key:
                 continue
             published = parse_iso(r["publish_at"]) or parse_iso(r["v_created"]) or now
             age_days = max(1.0, (now - published).total_seconds() / 86400)
@@ -493,11 +541,15 @@ class Pipeline:
             total += s["duration"] - 6
         return order_for_flow(chosen)
 
-    def create_compilation(self, progress: Progress = _noop) -> int:
+    def create_compilation(self, progress: Progress = _noop, series_key: str | None = None) -> int:
         rng = random.Random()
         min_sec = self.db.get_int("compilation_min_min") * 60
         x = float(self.db.get_setting("mix_crossfade_sec") or 6)
-        chosen = self.select_compilation_tracks()
+        comp_series = self.compilation_series(series_key)
+        if comp_series:
+            ser = series_mod.get(comp_series)
+            progress(f"{ser.emoji} {ser.label} serisinin en çok dinlenenleri derleniyor")
+        chosen = self.select_compilation_tracks(series_key=comp_series)
         total = sum(c["duration"] - x for c in chosen)
 
         if total < min_sec and self.db.get_setting("compilation_fill") == "repeat":
@@ -535,7 +587,10 @@ class Pipeline:
 
         styles = [c["style_key"] for c in chosen]
         main_style = STYLE_BY_KEY[max(set(styles), key=styles.count)]
-        video_id = self.db.add_video(kind="compilation", style_key=main_style.key, status="building")
+        video_id = self.db.add_video(kind="compilation", style_key=main_style.key, status="building",
+                                     series=comp_series)
+        if comp_series:
+            self.db.set_setting("last_compilation_series", comp_series)
         try:
             progress(f"🎚 {len(chosen)} parça crossfade ile birleştiriliyor")
             d = self._dir(f"video_{video_id}")
@@ -594,16 +649,19 @@ class Pipeline:
         tracklist, total = self._compilation_tracklist(video_id)
         kind = self.db.video(video_id)["kind"]
         n = tracklist.count("\n") + 1
-        extra = ("This is a curated mix of the channel's most listened recent tracks." if kind == "compilation"
-                 else f"One continuous {media.fmt_long(total)} mix of {n} tender romantic piano pieces, "
-                      "smoothly crossfaded, no ads or interruptions inside the music.")
+        v0 = self.db.video(video_id)
+        ser = series_mod.get(v0["series"]) if profiles.current().key == "romantic" else None
+        extra = ("This is a curated mix of the channel's most listened tracks from this series."
+                 if kind == "compilation"
+                 else f"One continuous {media.fmt_long(total)} mix of {n} pieces, smoothly crossfaded.")
         scene = style.scenes[0]
         if self._background(video_id):
             scene = "a cozy wood fireplace burning at night, warm flickering flames and glowing embers"
             if self.db.get_setting("fire_volume") not in ("", "0"):
                 extra += " Soft crackling fireplace sounds play gently under the music."
-        meta = metadata.generate(kind, style, total, scene, self.recent_titles(), extra=extra)
-        desc = metadata.full_description(meta.description, tracklist)
+        meta = metadata.generate(kind, style, total, scene, self.recent_titles(), extra=extra,
+                                 series_key=ser.key if ser else "")
+        desc = metadata.full_description(meta.description, tracklist, hashtags=ser.hashtags if ser else "")
         self.db.update_video(video_id, title=meta.title, description=desc, tags=meta.tags,
                              thumbnail_text=meta.thumbnail_text)
         self._refresh_short_text(video_id)
@@ -894,8 +952,11 @@ class Pipeline:
     def _add_to_playlists(self, yt, row, yid: str) -> None:
         prof = profiles.current()
         style_list = STYLE_BY_KEY[row["style_key"]].label + prof.style_playlist_suffix if row["style_key"] else None
-        names = {"daily": [style_list], "compilation": [prof.long_playlist],
+        series_list = series_mod.get(row["series"]).playlist if row["series"] else None
+        names = {"daily": [series_list, style_list], "compilation": [series_list or prof.long_playlist,
+                                                                     prof.long_playlist],
                  "mix": [prof.long_playlist, style_list], "short": []}
+        names = {k: list(dict.fromkeys(v)) for k, v in names.items()}  # aynı listeye iki kez ekleme
         for name in names.get(row["kind"], []):
             if not name:
                 continue

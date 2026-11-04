@@ -96,6 +96,10 @@ class Database:
             vcols = {r[1] for r in c.execute("PRAGMA table_info(videos)")}
             if "source" not in vcols:  # auto = zamanlanmış üretim, manual = elle /uret, /parcalar
                 c.execute("ALTER TABLE videos ADD COLUMN source TEXT")
+            if "series" not in vcols:  # romance | jazz | sleep | relax
+                c.execute("ALTER TABLE videos ADD COLUMN series TEXT")
+            if "series" not in {r[1] for r in c.execute("PRAGMA table_info(tracks)")}:
+                c.execute("ALTER TABLE tracks ADD COLUMN series TEXT")
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

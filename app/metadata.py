@@ -31,7 +31,7 @@ def _client() -> anthropic.Anthropic | None:
 
 
 def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_titles: list[str],
-             extra: str = "", theme_label: str = "", theme_key: str = "") -> VideoMeta:
+             extra: str = "", theme_label: str = "", theme_key: str = "", series_key: str = "") -> VideoMeta:
     client = _client()
     if client:
         minutes = round(duration_sec / 60)
@@ -42,6 +42,7 @@ def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_ti
             f"Music style: {style.label} — {style.base}\n"
             f"Visual scene: {scene}\n"
             f"Channel: {profiles.channel_name()}\n"
+            + (_series_hint(series_key) if series_key else "") +
             f"Recent titles to avoid repeating:\n" + "\n".join(f"- {t}" for t in recent_titles[:15]) +
             (f"\n\nExtra context: {extra}" if extra else "")
         )
@@ -59,14 +60,16 @@ def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_ti
             log.warning("Claude meta üretmedi (stop_reason=%s), şablona geçiliyor", resp.stop_reason)
         except anthropic.APIError as e:
             log.warning("Claude API hatası: %s — şablona geçiliyor", e)
-    return fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label, theme_key=theme_key)
+    return fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label, theme_key=theme_key,
+                    series_key=series_key)
 
 
 def fallback(kind: str, style: Style, duration_sec: float, rng: random.Random | None = None,
-             scene: str = "", theme_label: str = "", theme_key: str = "") -> VideoMeta:
+             scene: str = "", theme_label: str = "", theme_key: str = "", series_key: str = "") -> VideoMeta:
     rng = rng or random.Random()
     if profiles.current().key == "romantic":
-        return _fallback_romantic(kind, style, duration_sec, rng, fire="fireplace" in scene, theme_key=theme_key)
+        return _fallback_romantic(kind, style, duration_sec, rng, fire="fireplace" in scene, theme_key=theme_key,
+                                  series_key=series_key)
     minutes = round(duration_sec / 60)
     if kind in ("compilation", "mix"):
         title = rng.choice([
@@ -90,41 +93,37 @@ def fallback(kind: str, style: Style, duration_sec: float, rng: random.Random | 
                      track_name=rng.choice(["Quiet Hours", "Soft Focus", "Late Light", "Paper Moon", "Still Water"]))
 
 
-# Başlığın başındaki özgün, duygusal ifadeler (bilinen şarkı/film adı olmamalı)
-OPENERS = ("Stay Close Tonight", "One More Slow Dance", "Closer by the Fire", "Our Quiet Evening",
-           "Only You Tonight", "Warm Hands, Soft Lights", "Where Our Hearts Rest", "Hold Me a Little Longer",
-           "A Night for Two", "Slow Love, Soft Light", "Just Breathe With Me", "Forever Starts Tonight")
-PERFECT_FOR = ("Romantic evenings & date nights", "Couples & intimate moments", "Wine & candlelit dinners",
-               "Cozy nights at home", "Relaxing after a long day", "Reading & quiet time",
-               "Late-night relaxation", "Massage & self-care", "Falling asleep peacefully",
-               "Anniversaries & special nights")
-
-
 def _fallback_romantic(kind: str, style: Style, duration_sec: float, rng: random.Random,
-                       fire: bool = False, theme_key: str = "") -> VideoMeta:
+                       fire: bool = False, theme_key: str = "", series_key: str = "") -> VideoMeta:
+    """Claude yoksa: '<ifade> <emoji> <Tür> <mekân> | <Ambiyans>' kalıbında başlık, 'Perfect for' maddeli açıklama."""
+    from . import series as series_mod
     from .themes import SCENES
+    ser = series_mod.get(series_key)
     length = fmt_long(duration_sec)
     sc = SCENES.get(theme_key)
-    place = sc.title_place if sc else ("by the Fire" if fire else "for Two")
-    ambience = sc.ambience if sc else ("Cozy Night Ambience" if fire else "Romantic Night Ambience")
+    place = sc.title_place if sc else ("by the Fire" if fire else ("for Two" if ser.key == "romance" else ""))
+    ambience = sc.ambience if sc else ("Cozy Night Ambience" if fire else f"{ser.label} Ambience")
     if kind != "daily":
         ambience = f"{length} {ambience}"
-    emoji = rng.choice(["❤️", "🕯️", "🌹", "💕", "🌙", "🍷"])
-    title = f"{rng.choice(OPENERS)} {emoji} Romantic Love Music {place} | {ambience}"[:100]
-    scene_text = sc.text if sc else ("a warm room by a crackling fireplace" if fire else "a quiet romantic evening")
-    bullets = "\n".join(f"• {b}" for b in rng.sample(PERFECT_FOR, 8))
+    emoji = rng.choice({"jazz": ["☕", "🎷", "🌧️", "🌃"], "sleep": ["😴", "🌙", "✨", "💤"],
+                        "relax": ["🍃", "🌿", "🌊", "✨"]}.get(ser.key, ["❤️", "🕯️", "🌹", "💕", "🌙", "🍷"]))
+    title = " ".join(f"{rng.choice(ser.openers)} {emoji} {ser.genre} {place}".split()) + f" | {ambience}"
+    scene_text = sc.text if sc else ("a warm room by a crackling fireplace" if fire else "a quiet, peaceful evening")
+    bullets = "\n".join(f"• {b}" for b in rng.sample(ser.perfect_for, 8))
+    feel = {"jazz": "a warm, laid-back atmosphere to slow down, sip your coffee and let the evening flow",
+            "sleep": "a deeply calm atmosphere that helps you let go of the day and drift into restful sleep",
+            "relax": "a peaceful atmosphere to breathe, release stress and feel calm again"}.get(
+        ser.key, "a warm, intimate atmosphere where you can slow down, relax and simply be together")
     desc = (
-        f"Soft romantic love music for {scene_text} — a warm, intimate atmosphere where you can slow down, "
-        "relax and simply be together.\n\n"
-        f"🍷 Perfect for:\n{bullets}\n\n"
-        "Dim the lights, get comfortable and stay a while. 🌙❤️\n\n"
-        "🎧 Relax. Breathe. Love.\n\n"
-        "Subscribe for more romantic love music, cozy ambience and peaceful nights."
+        f"Soft {ser.genre.lower()} for {scene_text} — {feel}.\n\n"
+        f"✨ Perfect for:\n{bullets}\n\n"
+        "Dim the lights, get comfortable and stay a while. 🌙\n\n"
+        f"Subscribe for more {ser.genre.lower()} and peaceful moments."
     )
-    tags = [*profiles.current().base_tags, style.label.lower(), "romantic love music", "cozy night ambience"]
+    tags = [*profiles.current().base_tags, style.label.lower(), ser.genre.lower(), ser.label.lower()]
     if fire:
         tags += ["fireplace", "crackling fire", "fireplace ambience"]
-    return VideoMeta(title=title, description=desc, tags=tags, thumbnail_text=style.thumb_word,
+    return VideoMeta(title=title[:100], description=desc, tags=tags, thumbnail_text=style.thumb_word,
                      track_name=random_track_name(rng))
 
 
@@ -168,7 +167,14 @@ def short_title(parent_title: str, limit: int = 90) -> str:
     return f"{shorten(head, limit)} #shorts"
 
 
-def full_description(body: str, tracklist: str = "", extra_links: str = "") -> str:
+def _series_hint(series_key: str) -> str:
+    from . import series as series_mod
+    ser = series_mod.get(series_key)
+    return (f"Series: {ser.label} — use the genre phrase \"{ser.genre}\" in the title.\n"
+            f"Good 'Perfect for' ideas: {', '.join(ser.perfect_for)}\n")
+
+
+def full_description(body: str, tracklist: str = "", extra_links: str = "", hashtags: str = "") -> str:
     parts = [body.strip()]
     if tracklist:
         parts.append("Tracklist:\n" + tracklist)
@@ -177,5 +183,5 @@ def full_description(body: str, tracklist: str = "", extra_links: str = "") -> s
     if profiles.subscribe_url():
         parts.append(f"🔔 Subscribe to {profiles.channel_name()}: {profiles.subscribe_url()}")
     parts.append("Music and visuals are created with AI tools and curated by the channel.")
-    parts.append(profiles.current().hashtags)
+    parts.append(hashtags or profiles.current().hashtags)
     return "\n\n".join(parts)[:4900]

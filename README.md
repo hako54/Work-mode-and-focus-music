@@ -49,6 +49,17 @@ Derlemede parçalar en popüler olanla başlar ve enerji seviyesi en yakın par�
                parçalar sırayla TEKRARLANIR (yeni müzik üretilmez, ElevenLabs kredisi harcanmaz) → onaya gelir
 ```
 
+**Seriler (aynı kanalda, otomatik üretim sırayla döner):**
+
+| Seri | Müzik | Temalar | Başlık türü | Playlist |
+|---|---|---|---|---|
+| 💕 `romance` | romantik topluluk (piyano, yaylılar, gitar, sax, çello) | şömine, mum ışığı, gün batımı, deniz… | Romantic Love Music | Romantic Love Music |
+| ☕ `jazz` | cozy caz: piyano trio, sax, kontrbas, fırça davul, bossa nova | kafe, yağmur, şehir ışıkları, mum ışığı | Cozy Jazz Music | Cozy Jazz Nights |
+| 😴 `sleep` | çok yavaş, vurmalısız ambient + piyano | yıldızlı gece, yağmur, kar, göl | Sleep Music | Sleep Music • Deep Relaxation |
+| 🍃 `relax` | spa, doğa, meditasyon | orman, göl, deniz, çiçek | Relaxing Music | Relaxing Music • Calm & Healing |
+
+Uzun derlemeler de seri bazındadır (bir derlemede tek seri) ve seriler arasında sırayla döner. Telegram: `/seriler`, `/uret jazz kafe sahne`, `/uret uyku`, `/derleme sleep`.
+
 **İki video tarzı (sırayla):** (1) **Tek sahne** — temaya uygun tek, sinematik bir mekân (şömineli oturma odası, mum ışığında akşam yemeği, yağmurlu pencere, karlı dağ evi…) atlamasız döngüde; (2) **Kolaj** — temadaki kısa klip ve fotoğraflar. `/uret sonbahar sahne` ya da `/uret deniz kolaj` ile seçilebilir; `/ayar daily_visual scene|collage|both`. Müzik her zaman küçük, uyumlu bir topluluktur (piyano + yaylılar, akustik gitar, yumuşak saksafon/çello, pad, hafif fırça davul). Başlıklar: *"<özgün duygusal ifade> ❤️ Romantic Love Music by the Fire | Cozy Night Ambience"* kalıbında, açıklamalar "Perfect for:" maddeli.
 
 **Temalar ve görüntü:** Her parça bir temayla üretilir (deniz kenarı, sonbahar, orman, yağmur, kış, gün batımı, çiçek bahçesi, yıldızlı gece, göl, mum ışığı). Müzik talimatı temanın havasını anlatır; kısa videonun görüntüsü o temadaki Pexels kliplerinden ve fotoğraflarından yumuşak geçişli, atlamasız dönen bir **kolajdır** (aynı klip iki kez kullanılmaz). Uzun derlemelerde **şömine döngüsü** + çıtırtı kullanılır. Pexels anahtarı yoksa kısa videolarda da şömineye geçilir. Ücretsiz anahtar: pexels.com/api → `PEXELS_API_KEY`. Yayın saati 08:00; onay 08:00'den sonra gelirse ertesi sabah 08:00'e zamanlanır.

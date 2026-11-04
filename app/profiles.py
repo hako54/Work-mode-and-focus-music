@@ -122,20 +122,22 @@ ROMANTIC = Profile(
     ),
     image_style=("Dreamy romantic cinematic painting, soft golden and rose light, gentle bokeh, warm pastel colors, "
                  "elegant and emotional atmosphere, highly detailed"),
-    meta_system="""You write YouTube metadata for an instrumental romantic love music channel
-(soft romantic music for date nights, cozy evenings, dinner, relaxing, reading and sleep).
+    meta_system="""You write YouTube metadata for an instrumental music channel with four series:
+romantic love music, cozy jazz, sleep music and relaxing music (soft, calm, for cozy evenings,
+date nights, studying, relaxing and sleep). The request names the series and its genre phrase.
 
 TITLE format (max 90 characters):
-"<an original, short, emotional phrase, 2-5 words> <one emoji> Romantic Love Music <place from the scene, e.g.
-by the Fire / by Candlelight / on a Rainy Night> | <Ambience descriptor, e.g. Cozy Night Ambience>"
+"<an original, short, emotional phrase, 2-5 words> <one emoji> <genre phrase from the request, e.g. Romantic
+Love Music / Cozy Jazz Music / Sleep Music / Relaxing Music> <place from the scene, e.g. by the Fire /
+in a Cozy Café / on a Rainy Night> | <Ambience descriptor, e.g. Cozy Night Ambience>"
 For long mixes, add the length to the descriptor, e.g. "| 3 Hours Cozy Night Ambience".
 The opening phrase must be your own words (like an intimate invitation or a feeling) and must NOT be the title
 of an existing song, album or film. Vary the phrase and emoji every time (❤️ 🕯️ 🌹 🔥 🌙 🍷 💕 ✨).
 
 DESCRIPTION (plain text, no markdown):
 1) a warm opening paragraph (2 sentences) about the scene and the feeling the music creates,
-2) a line "🍷 Perfect for:" followed by 8-10 bullet lines starting with "• " (romantic evenings, date nights,
-couples, cozy nights, dinner, relaxing after a long day, reading, late-night relaxation, ...),
+2) a line "✨ Perfect for:" followed by 8-10 bullet lines starting with "• " suited to the series
+(use the ideas given in the request),
 3) a short intimate closing line with one or two emoji,
 4) a three-word tagline like "Relax. Feel. Love." (your own wording),
 5) one line inviting viewers to subscribe for more romantic music.
@@ -144,7 +146,7 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
     hashtags="#RomanticMusic #LoveMusic #RomanticPiano #CozyNight #RelaxingMusic #DateNight #RomanticAmbience",
     base_tags=("romantic piano", "romantic music", "love music", "relaxing piano", "beautiful piano music",
                "instrumental love songs", "piano for sleep", "dinner music", "wedding piano", "calm piano"),
-    long_playlist="Romantic Piano • Long Mixes",
+    long_playlist="Long Mixes • 1-3 Hours",
     style_playlist_suffix=" • Romantic Piano",
     track_words=(
         ("Moonlit", "Tender", "Golden", "Silent", "Velvet", "Endless", "Secret", "Gentle", "First", "Starlit",

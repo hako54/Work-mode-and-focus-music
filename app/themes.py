@@ -67,6 +67,16 @@ THEMES: tuple[Theme, ...] = (
           "a calm mountain lake at dawn with mist on still water",
           ("calm lake morning mist", "mountain lake reflection", "lake sunrise"),
           ("lake reflection", "misty lake", "wooden dock lake"), "🏞"),
+    Theme("cafe", "Kafe",
+          "a cozy café on a rainy evening, warm lamps and quiet conversations",
+          "a cozy café at night with warm lamps, coffee cups and rain on the window",
+          ("cozy cafe night", "coffee shop rain window", "cafe interior warm lights"),
+          ("cozy cafe", "coffee cup window rain", "cafe lights night"), "☕"),
+    Theme("city_night", "Şehir ışıkları",
+          "city lights glowing softly at night seen from a quiet apartment",
+          "a quiet apartment window at night overlooking glowing city lights",
+          ("city lights night window", "city night timelapse", "night city bokeh"),
+          ("city night lights", "apartment window city night", "night skyline"), "🌃"),
     Theme("candlelight", "Mum ışığı",
           "an intimate candlelit evening for two",
           "an intimate candlelit room with roses and warm soft light",
@@ -77,7 +87,7 @@ THEMES: tuple[Theme, ...] = (
 THEME_BY_KEY = {t.key: t for t in THEMES}
 
 # Başlıklarda kullanılan İngilizce adlar
-EN_LABEL = {"seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
+EN_LABEL = {"cafe": "Café", "city_night": "City Lights", "seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
             "winter": "Winter", "sunset": "Sunset", "flowers": "Rose Garden", "night_sky": "Starry Night",
             "lake": "Lakeside", "candlelight": "Candlelight"}
 
@@ -96,10 +106,18 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
     "fireside_love_ballad": ("autumn", "winter", "forest", "rain"),
     "romantic_sax_lounge": ("candlelight", "night_sky", "rain"),
     "acoustic_love_guitar": ("seaside", "sunset", "flowers", "lake"),
+    "cozy_jazz_cafe": ("cafe", "city_night", "rain"),
+    "rainy_jazz_night": ("rain", "cafe", "city_night"),
+    "bossa_nova_evening": ("seaside", "sunset", "cafe"),
+    "deep_sleep_ambient": ("night_sky", "lake", "winter"),
+    "sleep_piano_rain": ("rain", "winter", "night_sky"),
+    "nature_relax_piano": ("forest", "lake", "seaside"),
+    "healing_meditation": ("lake", "forest", "flowers"),
 }
 
 
-ALIASES = {"deniz": "seaside", "sahil": "seaside", "plaj": "seaside", "kar": "winter", "kis": "winter",
+ALIASES = {"kafe": "cafe", "cafe": "cafe", "kahve": "cafe", "sehir": "city_night", "şehir": "city_night",
+           "city": "city_night", "deniz": "seaside", "sahil": "seaside", "plaj": "seaside", "kar": "winter", "kis": "winter",
            "kış": "winter", "snow": "winter", "orman": "forest", "yagmur": "rain", "yağmur": "rain",
            "sonbahar": "autumn", "fall": "autumn", "gunbatimi": "sunset", "günbatımı": "sunset", "gun": "sunset",
            "gün": "sunset", "cicek": "flowers", "çiçek": "flowers", "gul": "flowers", "gül": "flowers",
@@ -144,6 +162,12 @@ SCENES: dict[str, Scene] = {
     "lake": Scene(("lake house dock sunset", "lake cabin evening", "calm lake sunset"),
                   "by the Lake", "Lakeside Evening Ambience",
                   "a wooden lake house dock at dusk with calm water and soft lights"),
+    "cafe": Scene(("cozy cafe night rain", "coffee shop interior evening", "cafe window rain night"),
+                  "in a Cozy Café", "Rainy Café Ambience",
+                  "a cozy café at night with warm lamps, a cup of coffee and rain on the window"),
+    "city_night": Scene(("city lights night window apartment", "night city view window", "city skyline night"),
+                        "Under the City Lights", "Late Night City Ambience",
+                        "a quiet apartment by a big window at night, city lights glowing below"),
     "candlelight": Scene(("candlelight dinner romantic", "candles dinner table night", "romantic candles"),
                          "by Candlelight", "Candlelit Dinner Ambience",
                          "an intimate candlelit dinner table for two with roses and warm soft light"),
@@ -162,11 +186,14 @@ def find_theme(text: str) -> Theme | None:
     return None
 
 
-def pick_theme(style_key: str, recent: list[str], rng: random.Random | None = None) -> Theme:
-    """Stile uygun temayı tercih et; son 2 temayı tekrar etme."""
+def pick_theme(style_key: str, recent: list[str], rng: random.Random | None = None,
+               allowed: tuple[str, ...] | None = None) -> Theme:
+    """Stile uygun temayı tercih et; son 2 temayı tekrar etme. allowed: serinin izin verdiği temalar."""
     rng = rng or random.Random()
-    preferred = [THEME_BY_KEY[k] for k in STYLE_THEMES.get(style_key, ()) if k not in recent[:2]]
-    others = [t for t in THEMES if t.key not in recent[:2] and t not in preferred]
+    pool = [t for t in THEMES if not allowed or t.key in allowed]
+    preferred = [THEME_BY_KEY[k] for k in STYLE_THEMES.get(style_key, ())
+                 if k not in recent[:2] and THEME_BY_KEY[k] in pool]
+    others = [t for t in pool if t.key not in recent[:2] and t not in preferred]
     if preferred and (not others or rng.random() < 0.75):
         return rng.choice(preferred)
-    return rng.choice(others or list(THEMES))
+    return rng.choice(others or pool or list(THEMES))

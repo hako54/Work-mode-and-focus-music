@@ -20,6 +20,7 @@ from .media import fmt_ts
 from .pipeline import LONG_KINDS, Pipeline
 from .profiles import SETTING_HELP, default_settings
 from .styles import STYLE_BY_KEY, active_styles
+from .series import SERIES, find_series
 from .themes import EN_LABEL, THEMES, find_theme
 
 log = logging.getLogger(__name__)
@@ -38,11 +39,12 @@ HELP_PRODUCTION = {
     "romantic": """<b>💕 Romantic Piano Otomasyonu</b>
 
 <b>Üretim</b>
-/uret [stil] [tema] [sahne|kolaj] – istediğin an yeni ~5 dk parça + Short (ör. /uret sonbahar sahne); takvimi kaydırmaz
+/uret [seri] [tema] [sahne|kolaj] – istediğin an yeni ~5 dk parça + Short (ör. /uret jazz kafe sahne); takvimi kaydırmaz
+/seriler – 💕 Romance · ☕ Cozy Jazz · 😴 Sleep · 🍃 Relaxing (otomatik üretim sırayla döner)
 /temalar – temalar (deniz, sonbahar, orman, yağmur, kar…)
 /kullanilan – yayınlanmış parçalar, en çok izlenenden aza (👁 ❤️, derleme sayısı, link)
 /dinle &lt;#no&gt; – bir parçayı tekrar dinle
-/derleme – şimdi en çok dinlenenlerden uzun derleme üret (kredi harcamaz)
+/derleme [seri] – şimdi bir serinin en çok dinlenenlerinden uzun derleme (kredi harcamaz)
 /parcalar – üretilmiş ama kullanılmamış parçaları dinle, beğendiklerini videoya çevir (kredisiz)
 /mix [dk] [stil] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
 
@@ -99,7 +101,7 @@ class Bot:
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
-            "kullanilan": self.cmd_used, "dinle": self.cmd_listen,
+            "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
             "video": self.cmd_video_link, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
@@ -222,10 +224,11 @@ class Bot:
 
     # ------------------------------------------------------------------ actions
     async def do_generate(self, style_key: str | None = None, theme_key: str | None = None,
-                          auto: bool = False, visual: str | None = None) -> None:
+                          auto: bool = False, visual: str | None = None, series_key: str | None = None) -> None:
         try:
             def work(key, progress):
-                return self.pipe.create_daily(key, progress, theme_key=theme_key, auto=auto, visual=visual)
+                return self.pipe.create_daily(key, progress, theme_key=theme_key, auto=auto, visual=visual,
+                                              series_key=series_key)
             vid = await self.run_heavy("günlük video", work, style_key)
             await self.send_card(vid)
         except Exception as e:  # noqa: BLE001
@@ -243,9 +246,11 @@ class Bot:
             await self.notify(f"⚠️ Uzun mix üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>\n"
                               "Üretilen parçalar kütüphanede kaldı; bir sonraki /uret onları kullanır.")
 
-    async def do_compilation(self) -> None:
+    async def do_compilation(self, series_key: str | None = None) -> None:
         try:
-            vid = await self.run_heavy("derleme", self.pipe.create_compilation)
+            def work(progress):
+                return self.pipe.create_compilation(progress, series_key=series_key)
+            vid = await self.run_heavy("derleme", work)
             await self.send_card(vid)
         except Exception as e:  # noqa: BLE001
             log.exception("Derleme hatası")
@@ -442,18 +447,21 @@ class Bot:
             f"<b>Sıradaki işler</b>\n{nxt}\n\n<b>Son videolar</b>\n{lines or '-'}")
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        key, theme, visual = None, None, None
+        key, theme, visual, ser = None, None, None, None
         modes = {"sahne": "scene", "scene": "scene", "kolaj": "collage", "collage": "collage",
                  "somine": "fireplace", "şömine": "fireplace"}
-        for a in ctx.args:  # /uret [stil] [tema] [sahne|kolaj] — sıra fark etmez
+        for a in ctx.args:  # /uret [seri] [stil] [tema] [sahne|kolaj] — sıra fark etmez
             if a.lower() in modes:
                 visual = modes[a.lower()]
+            elif find_series(a):
+                ser = find_series(a)
             elif a in {s.key for s in active_styles()}:
                 key = a
             elif find_theme(a):
                 theme = find_theme(a)
             else:
-                await update.message.reply_text(f"'{a}' bir stil ya da tema değil. /stiller ve /temalar ile listeye bakın.")
+                await update.message.reply_text(f"'{a}' bir seri, stil ya da tema değil. "
+                                                "/seriler, /stiller ve /temalar ile listeye bakın.")
                 return
         if profiles.current().main_kind == "mix":
             await update.message.reply_text("💕 Uzun mix üretimi başladı. Parça sayısına göre 20–60 dk sürebilir; "
@@ -463,7 +471,8 @@ class Bot:
         await update.message.reply_text(
             "🎬 Yeni parça üretimi başladı" + (f" ({theme.emoji} {theme.label})" if theme else "") +
             ", adımlar buraya gelecek. Bu ekstra video otomatik takvimi değiştirmez.")
-        asyncio.create_task(self.do_generate(key, theme.key if theme else None, visual=visual))
+        asyncio.create_task(self.do_generate(key, theme.key if theme else None, visual=visual,
+                                             series_key=ser.key if ser else None))
 
     async def cmd_themes(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lines = [f"{t.emoji} <code>{t.key}</code> – {t.label} ({EN_LABEL[t.key]})" for t in THEMES]
@@ -475,8 +484,24 @@ class Bot:
         if profiles.current().main_kind == "mix":
             await update.message.reply_text("Bu kanalda her video zaten uzun bir mix. /uret kullanın.")
             return
-        await update.message.reply_text("🎚 Derleme üretimi başladı.")
-        asyncio.create_task(self.do_compilation())
+        ser = find_series(ctx.args[0]) if ctx.args else None
+        if ctx.args and not ser:
+            await update.message.reply_text("Bilinmeyen seri. /seriler ile listeye bakın.")
+            return
+        await update.message.reply_text("🎚 Derleme üretimi başladı" + (f" ({ser.emoji} {ser.label})" if ser else
+                                                                        " (sıradaki seri)") + ".")
+        asyncio.create_task(self.do_compilation(ser.key if ser else None))
+
+    async def cmd_series(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        nxt = self.pipe.next_series()
+        counts = {r["s"]: r["n"] for r in self.db.query(
+            "SELECT COALESCE(t.series, 'romance') s, COUNT(*) n FROM videos v JOIN tracks t ON t.id = v.track_id "
+            "WHERE v.kind = 'daily' AND v.status IN ('scheduled', 'published') GROUP BY s")}
+        lines = [f"{s.emoji} <code>{s.key}</code> – {s.label} ({html.escape(s.genre)}) · {counts.get(s.key, 0)} video"
+                 + (" ← sıradaki" if s.key == nxt.key else "") for s in SERIES]
+        await update.message.reply_html(
+            "<b>Seriler</b> (otomatik üretim sırayla döner)\n" + "\n".join(lines) +
+            "\n\nÖrnek: <code>/uret jazz</code> · <code>/uret uyku yagmur</code> · <code>/derleme sleep</code>")
 
     async def cmd_pending(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         rows = self.db.pending()

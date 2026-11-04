@@ -325,6 +325,100 @@ ROMANTIC_STYLES: tuple[Style, ...] = (
         scenes=("seaside terrace at sunset with lanterns", "garden bench under string lights at dusk",
                 "sunlit bedroom with sheer curtains and flowers"),
     ),
+    # ---- Cozy Jazz serisi
+    Style(
+        key="cozy_jazz_cafe",
+        label="Cozy Jazz Café",
+        thumb_word="COZY JAZZ",
+        base="cozy smooth jazz instrumental, warm piano trio with a mellow tenor saxophone, upright bass and soft "
+             "brushed drums, relaxed swing",
+        instruments=("piano trio with mellow saxophone", "Rhodes piano, upright bass, brushes and soft sax",
+                     "jazz guitar, piano and upright bass with brushes"),
+        moods=("cozy and relaxed", "warm late-evening café", "smooth and laid-back", "calm and comforting"),
+        bpm=(70, 84),
+        energy=3,
+        scenes=("cozy jazz café at night with warm lamps and rain on the window",),
+    ),
+    Style(
+        key="rainy_jazz_night",
+        label="Rainy Night Jazz",
+        thumb_word="RAINY JAZZ",
+        base="slow cozy jazz ballad instrumental for a rainy night, soft piano, warm upright bass, gentle brushes, "
+             "mellow saxophone and distant soft rain",
+        instruments=("soft piano and saxophone with rain", "jazz piano trio with gentle rain ambience",
+                     "mellow jazz guitar and piano with rain"),
+        moods=("melancholic and cozy", "quiet rainy night", "warm and intimate"),
+        bpm=(62, 76),
+        energy=2,
+        scenes=("rainy city street at night seen from a warm café window",),
+    ),
+    Style(
+        key="bossa_nova_evening",
+        label="Bossa Nova Evening",
+        thumb_word="BOSSA NOVA",
+        base="soft bossa nova instrumental, gentle nylon guitar, warm piano, light shaker and soft bass, breezy "
+             "and relaxed",
+        instruments=("nylon guitar and piano with soft percussion", "bossa guitar with mellow flute and bass",
+                     "piano, nylon guitar and soft brushes"),
+        moods=("breezy and warm", "sunset terrace calm", "relaxed and sweet"),
+        bpm=(72, 86),
+        energy=3,
+        scenes=("seaside café terrace at sunset with string lights",),
+    ),
+    # ---- Sleep serisi
+    Style(
+        key="deep_sleep_ambient",
+        label="Deep Sleep Ambient",
+        thumb_word="DEEP SLEEP",
+        base="deep sleep ambient instrumental, very slow warm pads with sparse soft piano notes and gentle low "
+             "strings, no percussion",
+        instruments=("warm evolving pads with distant soft piano", "low strings and soft pads with sparse piano",
+                     "soft synth pad drones with gentle piano"),
+        moods=("weightless and sleepy", "calm and safe", "slow and dreamy"),
+        bpm=(40, 54),
+        energy=1,
+        scenes=("starry night sky over a quiet lake",),
+    ),
+    Style(
+        key="sleep_piano_rain",
+        label="Sleep Piano & Rain",
+        thumb_word="SLEEP & RAIN",
+        base="very slow soothing sleep piano instrumental with soft rain sounds, warm pads and gentle cello, "
+             "no percussion",
+        instruments=("soft felt piano with rain and pads", "piano and cello with gentle rain",
+                     "sparse piano with warm strings and rain"),
+        moods=("drowsy and peaceful", "cozy rainy night", "quiet and comforting"),
+        bpm=(44, 58),
+        energy=1,
+        scenes=("rain on a bedroom window at night with a dim lamp",),
+    ),
+    # ---- Relaxing serisi
+    Style(
+        key="nature_relax_piano",
+        label="Nature Relaxing Piano",
+        thumb_word="RELAX",
+        base="calm relaxing instrumental, soft piano with warm strings, gentle pads and light nature sounds "
+             "(soft stream and birds far away)",
+        instruments=("soft piano with strings and stream sounds", "piano, nylon guitar and gentle forest ambience",
+                     "piano with warm pads and soft water sounds"),
+        moods=("peaceful and refreshing", "stress relief", "calm and grounded"),
+        bpm=(54, 68),
+        energy=1,
+        scenes=("misty forest with a soft stream",),
+    ),
+    Style(
+        key="healing_meditation",
+        label="Healing Meditation",
+        thumb_word="MEDITATION",
+        base="healing meditation instrumental, warm drones, soft piano, low alto flute and gentle pads, very calm "
+             "and spacious",
+        instruments=("warm drones with soft piano and alto flute", "soft pads, piano and low strings",
+                     "gentle piano with warm ambient textures"),
+        moods=("centered and calm", "healing and gentle", "deeply relaxing"),
+        bpm=(48, 60),
+        energy=1,
+        scenes=("calm lake at dawn with mist",),
+    ),
 )
 
 ALL_STYLES: tuple[Style, ...] = FOCUS_STYLES + ROMANTIC_STYLES
@@ -340,7 +434,7 @@ KEYS = ("C major", "D major", "F major", "G major", "A minor", "D minor", "E min
 
 
 def pick_style(recent_keys: list[str], avg_views: dict[str, float], rng: random.Random | None = None,
-               disabled: set[str] | None = None) -> Style:
+               disabled: set[str] | None = None, only: tuple[str, ...] | None = None) -> Style:
     """Bugünün stilini seç.
 
     recent_keys: en yeniden eskiye son kullanılan stiller (ilk 2'si tekrar seçilmez).
@@ -348,7 +442,7 @@ def pick_style(recent_keys: list[str], avg_views: dict[str, float], rng: random.
     """
     rng = rng or random.Random()
     disabled = disabled or set()
-    styles = active_styles()
+    styles = [s for s in active_styles() if not only or s.key in only] or list(active_styles())
     pool = [s for s in styles if s.key not in disabled] or list(styles)
     blocked = set(recent_keys[:2])
     candidates = [s for s in pool if s.key not in blocked] or pool
@@ -363,14 +457,15 @@ def pick_style(recent_keys: list[str], avg_views: dict[str, float], rng: random.
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
-def build_music_prompt(style: Style, rng: random.Random | None = None, theme=None) -> str:
+def build_music_prompt(style: Style, rng: random.Random | None = None, theme=None, purpose: str = "") -> str:
+    """purpose: serinin müzik amacı (boşsa profilin varsayılanı)."""
     rng = rng or random.Random()
     bpm = rng.randint(*style.bpm)
     return (
         f"Instrumental {style.base}. Featuring {rng.choice(style.instruments)}. "
         + (f"Inspired by {theme.music_hint}. " if theme else "") +
         f"Mood: {rng.choice(style.moods)}. {bpm} BPM, in {rng.choice(KEYS)}. "
-        f"{profiles.current().music_purpose} "
+        f"{purpose or profiles.current().music_purpose} "
         "No vocals, no lyrics. Clean, warm, professional mix."
     )
 
