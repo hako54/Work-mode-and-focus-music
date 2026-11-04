@@ -75,11 +75,43 @@ def backgrounds() -> list[Background]:
     return [Background("image", p) for p in photos]
 
 
-def pick_background(rng: random.Random, avoid: str | None = None) -> Background | None:
+RATING_WEIGHT = {0: 0.0, 1: 0.25, 2: 0.5, 3: 1.0, 4: 2.0, 5: 4.0}  # 5 yıldız ≈ 3 yıldızın 4 katı sık
+
+
+def bg_id(bg: Background) -> str:
+    """Telegram düğmeleri için kısa, kalıcı kimlik."""
+    return hashlib.sha1(bg.name.encode()).hexdigest()[:10]
+
+
+def find_by_id(bid: str) -> Background | None:
+    return next((b for b in backgrounds() if bg_id(b) == bid), None)
+
+
+def _weights(pool: list[Background], ratings: dict[str, int] | None) -> list[float]:
+    ratings = ratings or {}
+    return [RATING_WEIGHT.get(ratings.get(b.name, 3), 1.0) for b in pool]
+
+
+def pick_background(rng: random.Random, avoid: str | None = None,
+                    ratings: dict[str, int] | None = None) -> Background | None:
+    """Puana göre ağırlıklı seçim (🚫 = 0 puanlılar hiç seçilmez; hepsi 0 ise yine de biri seçilir)."""
     pool = backgrounds()
     if len(pool) > 1 and avoid:
         pool = [b for b in pool if b.name != avoid] or pool
-    return rng.choice(pool) if pool else None
+    if not pool:
+        return None
+    weights = _weights(pool, ratings)
+    if sum(weights) <= 0:
+        return rng.choice(pool)
+    return rng.choices(pool, weights=weights, k=1)[0]
+
+
+def weighted_order(pool: list[Background], rng: random.Random, ratings: dict[str, int] | None) -> list[Background]:
+    """Puanı yüksek olanlar daha önde olacak şekilde ağırlıklı karıştır; 0 puanlılar dışarıda."""
+    items = [(b, w) for b, w in zip(pool, _weights(pool, ratings)) if w > 0]
+    # Efraimidis–Spirakis: anahtar = u^(1/w), büyükten küçüğe
+    keyed = sorted(items, key=lambda bw: rng.random() ** (1.0 / bw[1]), reverse=True)
+    return [b for b, _ in keyed]
 
 
 def find_background(name: str) -> Background | None:

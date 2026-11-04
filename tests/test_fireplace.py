@@ -191,3 +191,30 @@ def test_own_fireplace_videos_can_be_slowed_and_previewed(tmp_path, monkeypatch)
     prev = fireplace.preview_of(bg)
     assert prev.exists() and media.duration(prev) <= 20.5
     assert validate_setting("bg_slow", "1.25") is None and validate_setting("bg_slow", "3")
+
+
+def test_ratings_steer_background_usage(tmp_path):
+    import random
+    names = []
+    for n in range(3):
+        bg = fireplace.save_upload(fire_video(tmp_path / f"r{n}.mp4", 5, audio=False), f"r{n}.mp4")
+        names.append(bg.name)
+    db = Database(tmp_path / "rate.db")
+    pipe = Pipeline(db)
+    pipe.set_bg_rating(names[0], 5)   # favori
+    pipe.set_bg_rating(names[1], 3)
+    pipe.set_bg_rating(names[2], 0)   # 🚫 kullanma
+    ratings = pipe.bg_ratings()
+    assert ratings == {names[0]: 5, names[1]: 3, names[2]: 0}
+
+    rng = random.Random(4)
+    picks = [fireplace.pick_background(rng, ratings=ratings).name for _ in range(600)]
+    assert picks.count(names[2]) == 0                       # hiç kullanılmaz
+    assert picks.count(names[0]) > 3 * picks.count(names[1])  # 5⭐ ≈ 4x daha sık
+
+    first = fireplace.find_by_id(fireplace.bg_id(fireplace.backgrounds()[0]))
+    assert first is not None
+    fav = next(b for b in fireplace.backgrounds() if b.name == names[0])
+    order = pipe._rotation_order(fav, random.Random(1))
+    assert names[2] not in [b.name for b in order]           # uzun videoda da yok
+    assert order[0].name == names[0]

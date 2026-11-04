@@ -98,6 +98,7 @@ Videoların arka planı, gerçek bir şöminede yanan ateş gibi atlamasız dön
 - **Çıtırtı sesi:** Gönderdiğiniz videonun kendi sesi varsa o kullanılır (en doğal sonuç). Yoksa ElevenLabs ile bir kez şömine sesi üretilip saklanır. O da olmazsa sentezlenmiş çıtırtı kullanılır. Ses seviyesi `/ayar fire_volume 20` (0 = kapalı) ile ayarlanır.
 - **Büyük (4K, 300 MB+) videolar:** Google Drive'a yükleyin ("Bağlantıya sahip olan herkes" ile paylaşın) ve bota `/video <link> [link2 …]` gönderin (tek mesajda birden fazla link olabilir). Dropbox ve doğrudan .mp4/.mov linkleri de çalışır (en fazla 3 GB). Her video otomatik olarak 1080p, 30 fps ve ilk 45 saniyeye küçültülür; ses korunur.
 - **Birden fazla şömine videosu varsa** uzun derlemelerde arka plan **20–30 dakikada bir** 2 sn'lik yumuşak geçişle değişir (`/ayar bg_rotate 0|1`, `bg_rotate_min_min`, `bg_rotate_max_min`). Uzun video yeniden kodlanmadığı için hızlıdır ve ek disk gerektirmez.
+- **Puanlama:** `/arkaplan yenile` önizlemelerinin ve yeni eklenen videoların altındaki 1⭐–5⭐ düğmeleriyle puan verin. 5⭐ bir video 3⭐'lıdan ~4 kat sık kullanılır, 1⭐ nadiren, 🚫 hiç. Uzun videolarda yüksek puanlılar öne alınır, 4–5⭐'lılar bir kez daha görünür.
 - `/arkaplan` arka planları listeler, `/arkaplan sil <ad>` siler. `/ayar fireplace 0` ile şömine yerine yapay zeka sahne görsellerine dönülür.
 - Hazırlanan döngüler `/data/assets/cache` içinde saklanır; her videoda yeniden işlenmez. Hareketli ateş çok detaylı olduğu için video dosyası büyüktür: 3 saatlik bir mix yaklaşık 2,5 GB olur (yükleme sonrası silinir).
 

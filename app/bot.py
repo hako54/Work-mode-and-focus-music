@@ -324,6 +324,9 @@ class Bot:
                 await q.answer("Yetkiniz yok")
             return
         action, _, raw = (q.data or "").partition(":")
+        if action == "bgr":  # arka plan puanı: bgr:<id>:<0-5>
+            await self.on_bg_rating(q, raw)
+            return
         vid = int(raw)
         await q.answer()
         if action in ("tv", "td"):  # kütüphane parçası: videoya çevir / sil
@@ -725,6 +728,29 @@ class Bot:
             tmp.unlink(missing_ok=True)
             await msg.reply_text(f"⚠️ Arka plan eklenemedi: {str(e)[:500]}")
 
+    STARS = {0: "🚫 kullanılmıyor", 1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
+
+    def _rating_keyboard(self, bg) -> InlineKeyboardMarkup:
+        bid = fireplace.bg_id(bg)
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{n}⭐", callback_data=f"bgr:{bid}:{n}") for n in range(1, 6)],
+            [InlineKeyboardButton("🚫 Kullanma", callback_data=f"bgr:{bid}:0")]])
+
+    async def on_bg_rating(self, q, raw: str) -> None:
+        bid, _, score = raw.partition(":")
+        bg = fireplace.find_by_id(bid)
+        if not bg:
+            await q.answer("Bu arka plan artık yok")
+            return
+        self.pipe.set_bg_rating(bg.name, int(score))
+        await q.answer(f"Puan: {self.STARS[int(score)]}")
+        base = (q.message.caption or "").split("\n🏷 Puan:")[0]
+        try:
+            await q.edit_message_caption(f"{base}\n🏷 Puan: {self.STARS[int(score)]}",
+                                         reply_markup=self._rating_keyboard(bg))
+        except Exception:  # noqa: BLE001 — aynı puana tekrar basılırsa Telegram "değişiklik yok" der
+            pass
+
     async def _reply_background(self, msg, bg) -> None:
         loop = fireplace.loop_for(bg, (1920, 1080))
         note = ("Bu video(lar) varken fotoğraflar kullanılmaz; ateş sesi videonun kendi sesinden alınır "
@@ -732,8 +758,8 @@ class Bot:
                 "Fotoğraf hafif ışık titremesiyle döngüye çevrildi.")
         with open(loop, "rb") as fh:
             await msg.reply_video(fh, caption=f"✅ Arka plan eklendi: {bg.name}\n{note}\n"
-                                              f"Toplam: {len(fireplace.backgrounds())} · /arkaplan",
-                                  read_timeout=120, write_timeout=120)
+                                              f"Toplam: {len(fireplace.backgrounds())} · /arkaplan\nPuan verin:",
+                                  reply_markup=self._rating_keyboard(bg), read_timeout=120, write_timeout=120)
 
     async def cmd_video_link(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """/video <link> [link2 ...]: Drive/Dropbox/doğrudan linklerle büyük (4K, 300 MB+) videolar ekle."""
@@ -769,7 +795,9 @@ class Bot:
             await update.message.reply_text("🗑 Silindi." if ok else "Bulunamadı (repodaki varsayılan fotoğraf silinemez).")
             return
         bgs = fireplace.backgrounds()
-        lines = [f"{'🎬' if b.kind == 'video' else '🖼'} <code>{html.escape(b.name)}</code>"
+        ratings = self.pipe.bg_ratings()
+        lines = [f"{'🎬' if b.kind == 'video' else '🖼'} <code>{html.escape(b.name)}</code> "
+                 f"{self.STARS[ratings.get(b.name, 3)]}{'' if b.name in ratings else ' (puansız)'}"
                  + (" (varsayılan)" if b.path.parent == fireplace.BUNDLED_DIR else "") for b in bgs]
         state = "açık" if self.db.get_setting("fireplace") == "1" else "kapalı"
         await update.message.reply_html(
@@ -777,7 +805,7 @@ class Bot:
             + ("\n".join(lines) or "Yok") +
             f"\nAğır çekim: {self.db.get_setting('bg_slow') or '1.0'}x"
             "\n\nYeni eklemek için bota video ya da fotoğraf gönderin. Silmek: /arkaplan sil &lt;ad&gt;\n"
-            "Yeniden işle + önizleme: /arkaplan yenile [1.0–2.0]")
+            "Yeniden işle + önizleme ve puanlama: /arkaplan yenile [1.0–2.0]")
 
     async def _refresh_backgrounds(self, update: Update, args: list[str]) -> None:
         """/arkaplan yenile [yavaşlık]: şömine videolarını güncel ayarlarla yeniden işle, önizlemelerini gönder."""
@@ -801,11 +829,15 @@ class Bot:
             try:
                 prev = await self.run_heavy(f"arka plan {n}/{len(bgs)}", lambda progress, b=bg: fireplace.preview_of(b))
                 loop_len = media.duration(fireplace.loop_for(bg, (1920, 1080)))
+                score = self.pipe.bg_ratings().get(bg.name)
                 with open(prev, "rb") as fh:
                     await msg.reply_video(fh, supports_streaming=True, read_timeout=120, write_timeout=120,
+                                          reply_markup=self._rating_keyboard(bg),
                                           caption=f"🎬 {n}/{len(bgs)} · {bg.name}\n"
                                                   f"{'🐢 ' + format(fireplace.BG_SLOW, 'g') + 'x ağır çekim · ' if bg.kind == 'video' and fireplace.BG_SLOW > 1 else ''}"
-                                                  f"döngü {loop_len:.0f} sn (uzun videolarda bu döngü tekrar eder)")
+                                                  f"döngü {loop_len:.0f} sn (uzun videolarda bu döngü tekrar eder)"
+                                                  + (f"\n🏷 Puan: {self.STARS[score]}" if score is not None else
+                                                     "\nPuan verin (yüksek puanlılar daha sık kullanılır):"))
             except Exception as e:  # noqa: BLE001
                 log.exception("Arka plan yenilenemedi")
                 await msg.reply_text(f"⚠️ {bg.name} işlenemedi: {str(e)[:300]}")

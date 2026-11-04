@@ -324,7 +324,7 @@ class Pipeline:
         v = self.db.video(video_id)
         marker = self._dir(f"video_{video_id}") / "background.txt"
         prev = marker.read_text().strip() if marker.exists() else None
-        bg = fireplace.pick_background(rng, avoid=prev)
+        bg = fireplace.pick_background(rng, avoid=prev, ratings=self.bg_ratings())
         marker.write_text(bg.name)
         img = fireplace.still_frame(bg, self._dir(f"track_{v['track_id']}") / "image.png")
         self.db.update_track(v["track_id"], image_path=str(img))
@@ -635,7 +635,7 @@ class Pipeline:
         marker = d / "background.txt"
         if self.fireplace_on():
             prev = marker.read_text().strip() if marker.exists() else None
-            bg = fireplace.pick_background(rng, avoid=prev)
+            bg = fireplace.pick_background(rng, avoid=prev, ratings=self.bg_ratings())
             marker.write_text(bg.name)
             fireplace.still_frame(bg, d / "image.png")
         else:
@@ -689,10 +689,21 @@ class Pipeline:
 
     ROTATE_UNIT_SEC = 60  # bg_rotate_*_min ayarları dakika cinsinden (testlerde kısaltılır)
 
+    def bg_ratings(self) -> dict[str, int]:
+        """Arka plan puanları (ayar: bg_rating:<ad>, 0-5; puanlanmamış = 3)."""
+        return {r["key"][len("bg_rating:"):]: int(r["value"]) for r in self.db.query(
+            "SELECT key, value FROM settings WHERE key LIKE 'bg_rating:%'")}
+
+    def set_bg_rating(self, name: str, score: int) -> None:
+        self.db.set_setting(f"bg_rating:{name}", str(max(0, min(5, score))))
+
     def _rotation_order(self, first: fireplace.Background, rng: random.Random) -> list[fireplace.Background]:
+        """Uzun videoda arka plan sırası: seçilen ilk, sonra puana göre ağırlıklı (yüksek puanlılar önde)."""
         others = [b for b in fireplace.backgrounds() if b.name != first.name]
-        rng.shuffle(others)
-        return [first, *others]
+        ordered = fireplace.weighted_order(others, rng, self.bg_ratings())
+        if len(ordered) >= 2 and self.bg_ratings().get(first.name, 3) >= 4:
+            ordered.insert(len(ordered) // 2 + 1, first)  # favori uzun videoda bir kez daha görünsün
+        return [first, *ordered]
 
     def _compilation_render(self, video_id: int) -> None:
         d = self._dir(f"video_{video_id}")
