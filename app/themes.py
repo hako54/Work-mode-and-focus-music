@@ -67,6 +67,11 @@ THEMES: tuple[Theme, ...] = (
           "a calm mountain lake at dawn with mist on still water",
           ("calm lake morning mist", "mountain lake reflection", "lake sunrise"),
           ("lake reflection", "misty lake", "wooden dock lake"), "🏞"),
+    Theme("fireplace", "Şömine",
+          "a warm crackling fireplace on a cozy night at home",
+          "a cozy living room by a crackling fireplace at night, armchair, blankets and warm lamps",
+          ("cozy fireplace living room", "fireplace burning cozy room", "stone fireplace night"),
+          ("cozy fireplace", "fireplace living room", "fireplace armchair"), "🔥"),
     Theme("picnic", "Sonbahar pikniği",
           "a quiet autumn picnic in the forest with golden leaves slowly falling",
           "an autumn picnic in a quiet forest with a blanket, a basket and golden leaves",
@@ -92,7 +97,7 @@ THEMES: tuple[Theme, ...] = (
 THEME_BY_KEY = {t.key: t for t in THEMES}
 
 # Başlıklarda kullanılan İngilizce adlar
-EN_LABEL = {"picnic": "Autumn Picnic", "cafe": "Café", "city_night": "City Lights", "seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
+EN_LABEL = {"fireplace": "Fireplace", "picnic": "Autumn Picnic", "cafe": "Café", "city_night": "City Lights", "seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
             "winter": "Winter", "sunset": "Sunset", "flowers": "Rose Garden", "night_sky": "Starry Night",
             "lake": "Lakeside", "candlelight": "Candlelight"}
 
@@ -108,20 +113,21 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
     "rainy_romance_piano": ("rain", "autumn", "winter"),
     "classical_romance_piano": ("autumn", "flowers", "lake"),
     "wedding_piano": ("flowers", "sunset", "seaside"),
-    "fireside_love_ballad": ("autumn", "winter", "forest", "rain"),
+    "fireside_love_ballad": ("fireplace", "autumn", "winter", "forest", "rain"),
     "romantic_sax_lounge": ("candlelight", "night_sky", "rain"),
     "acoustic_love_guitar": ("seaside", "sunset", "flowers", "lake", "picnic"),
-    "cozy_jazz_cafe": ("cafe", "city_night", "rain"),
+    "cozy_jazz_cafe": ("cafe", "city_night", "rain", "fireplace"),
     "rainy_jazz_night": ("rain", "cafe", "city_night"),
     "bossa_nova_evening": ("seaside", "sunset", "cafe"),
     "deep_sleep_ambient": ("night_sky", "lake", "winter"),
-    "sleep_piano_rain": ("rain", "winter", "night_sky"),
+    "sleep_piano_rain": ("rain", "winter", "night_sky", "fireplace"),
     "nature_relax_piano": ("forest", "lake", "seaside"),
     "healing_meditation": ("lake", "forest", "flowers"),
 }
 
 
-ALIASES = {"piknik": "picnic", "picnic": "picnic", "kafe": "cafe", "cafe": "cafe", "kahve": "cafe", "sehir": "city_night", "şehir": "city_night",
+ALIASES = {"şömine": "fireplace", "somine": "fireplace", "fireplace": "fireplace", "ates": "fireplace",
+           "ateş": "fireplace", "piknik": "picnic", "picnic": "picnic", "kafe": "cafe", "cafe": "cafe", "kahve": "cafe", "sehir": "city_night", "şehir": "city_night",
            "city": "city_night", "deniz": "seaside", "sahil": "seaside", "plaj": "seaside", "kar": "winter", "kis": "winter",
            "kış": "winter", "snow": "winter", "orman": "forest", "yagmur": "rain", "yağmur": "rain",
            "sonbahar": "autumn", "fall": "autumn", "gunbatimi": "sunset", "günbatımı": "sunset", "gun": "sunset",
@@ -167,6 +173,9 @@ SCENES: dict[str, Scene] = {
     "lake": Scene(("lake house dock sunset", "lake cabin evening", "calm lake sunset"),
                   "by the Lake", "Lakeside Evening Ambience",
                   "a wooden lake house dock at dusk with calm water and soft lights"),
+    "fireplace": Scene(("cozy fireplace living room", "fireplace armchair cozy night", "stone fireplace burning"),
+                       "by the Fire", "Cozy Fireplace Ambience",
+                       "a cozy living room by a crackling fireplace at night, an armchair, blankets and warm lamps"),
     "picnic": Scene(("autumn picnic forest", "picnic blanket autumn leaves", "autumn forest picnic basket"),
                     "at an Autumn Picnic", "Autumn Forest Ambience",
                     "a quiet autumn picnic in the forest, a blanket, a basket and golden leaves slowly falling"),
@@ -182,8 +191,30 @@ SCENES: dict[str, Scene] = {
 }
 
 
+TR_SUFFIXES = ("ndaki", "ndeki", "daki", "deki", "taki", "teki", "nda", "nde", "lı", "li", "lu", "lü", "da", "de",
+               "ta", "te", "ya", "ye", "a", "e", "ı", "i", "u", "ü")
+
+
+def _variants(text: str) -> list[str]:
+    """Türkçe eklerini atarak aday kökler: 'şömineli' -> 'şömine', 'ormanda' -> 'orman', 'karlı' -> 'kar'."""
+    t = text.strip().lower().replace("i̇", "i")
+    out = [t]
+    for suf in TR_SUFFIXES:
+        if t.endswith(suf) and len(t) - len(suf) >= 2:
+            out.append(t[: -len(suf)])
+    return out
+
+
 def find_theme(text: str) -> Theme | None:
-    """'autumn', 'sonbahar', 'Sonbahar', 'deniz', 'kar' gibi bir yazıdan temayı bul."""
+    """'autumn', 'sonbahar', 'deniz', 'kar', 'şömineli', 'yağmurlu', 'ormanda' gibi bir yazıdan temayı bul."""
+    for v in _variants(text):
+        th = _find_theme_exact(v)
+        if th:
+            return th
+    return None
+
+
+def _find_theme_exact(text: str) -> Theme | None:
     t = text.strip().lower()
     if t in ALIASES:
         return THEME_BY_KEY[ALIASES[t]]

@@ -35,8 +35,8 @@ SERIES: tuple[Series, ...] = (
         ("romantic_solo_piano", "piano_strings_love", "moonlight_piano", "piano_cello_romance",
          "candlelight_jazz_piano", "wedding_piano", "rainy_romance_piano", "classical_romance_piano",
          "dreamy_ambient_love", "fireside_love_ballad", "romantic_sax_lounge", "acoustic_love_guitar"),
-        ("autumn", "winter", "candlelight", "sunset", "seaside", "flowers", "rain", "night_sky", "lake", "forest",
-         "picnic"),
+        ("fireplace", "autumn", "winter", "candlelight", "sunset", "seaside", "flowers", "rain", "night_sky", "lake",
+         "forest", "picnic"),
         "",
         ("Romantic evenings & date nights", "Couples & intimate moments", "Wine & candlelit dinners",
          "Cozy nights at home", "Relaxing after a long day", "Reading & quiet time", "Late-night relaxation",
@@ -51,7 +51,7 @@ SERIES: tuple[Series, ...] = (
         "jazz", "Cozy Jazz", "☕", "Cozy Jazz Music",
         ("cozy_jazz_cafe", "rainy_jazz_night", "bossa_nova_evening", "romantic_sax_lounge",
          "candlelight_jazz_piano"),
-        ("cafe", "rain", "city_night", "candlelight", "autumn", "winter", "sunset", "picnic"),
+        ("cafe", "fireplace", "rain", "city_night", "candlelight", "autumn", "winter", "sunset", "picnic"),
         "Cozy smooth jazz for a relaxing evening at home or in a quiet café: soft swing feel, warm upright bass, "
         "gentle brushed drums, mellow piano, saxophone or guitar sharing the melody, relaxed and laid-back, "
         "warm and intimate sound. " + _SOFT + " " + _ENSEMBLE,
@@ -67,7 +67,7 @@ SERIES: tuple[Series, ...] = (
     Series(
         "sleep", "Uyku", "😴", "Sleep Music",
         ("deep_sleep_ambient", "sleep_piano_rain", "moonlight_piano", "dreamy_ambient_love"),
-        ("night_sky", "rain", "winter", "lake"),
+        ("night_sky", "rain", "winter", "lake", "fireplace"),
         "Deep sleep music: extremely slow, minimal and soothing, warm evolving ambient pads with sparse soft "
         "piano and gentle low strings, no percussion, no drums, steady very low dynamics, no melodic jumps, "
         "a continuous calm that helps the listener fall and stay asleep. " + _SOFT,
@@ -105,7 +105,11 @@ ALIASES = {"romance": "romance", "romantik": "romance", "romantic": "romance", "
 
 
 def find_series(text: str) -> Series | None:
-    return SERIES_BY_KEY.get(ALIASES.get(text.strip().lower(), ""))
+    t = text.strip().lower()
+    for v in (t, t.rstrip("ıiuü"), t[:-2] if len(t) > 4 else t):  # 'uykuya', 'cazlı' gibi ekler
+        if v in ALIASES:
+            return SERIES_BY_KEY[ALIASES[v]]
+    return None
 
 
 def of_style(style_key: str) -> Series:

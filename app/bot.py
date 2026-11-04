@@ -481,8 +481,9 @@ class Bot:
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         key, theme, visual, ser = None, None, None, None
-        modes = {"sahne": "scene", "scene": "scene", "kolaj": "collage", "collage": "collage",
-                 "somine": "fireplace", "şömine": "fireplace"}
+        modes = {"sahne": "scene", "scene": "scene", "tek": "scene", "kolaj": "collage", "collage": "collage",
+                 "kendi": "fireplace"}
+        ignored = []
         for a in ctx.args:  # /uret [seri] [stil] [tema] [sahne|kolaj] — sıra fark etmez
             if a.lower() in modes:
                 visual = modes[a.lower()]
@@ -493,17 +494,20 @@ class Bot:
             elif find_theme(a):
                 theme = find_theme(a)
             else:
-                await update.message.reply_text(f"'{a}' bir seri, stil ya da tema değil. "
-                                                "/seriler, /stiller ve /temalar ile listeye bakın.")
-                return
+                ignored.append(a)  # "oda", "bir", "ile" gibi kelimeler hata vermesin
         if profiles.current().main_kind == "mix":
             await update.message.reply_text("💕 Uzun mix üretimi başladı. Parça sayısına göre 20–60 dk sürebilir; "
                                             "adımlar buraya gelecek.")
             asyncio.create_task(self.do_mix(key))
             return
+        picked = " · ".join(x for x in (f"{ser.emoji} {ser.label}" if ser else "",
+                                        f"{theme.emoji} {theme.label}" if theme else "",
+                                        {"scene": "tek sahne", "collage": "kolaj", "fireplace": "kendi şömine videon"}
+                                        .get(visual, "")) if x)
         await update.message.reply_text(
-            "🎬 Yeni parça üretimi başladı" + (f" ({theme.emoji} {theme.label})" if theme else "") +
-            ", adımlar buraya gelecek. Bu ekstra video otomatik takvimi değiştirmez.")
+            "🎬 Yeni parça üretimi başladı" + (f" ({picked})" if picked else "") +
+            ", adımlar buraya gelecek. Bu ekstra video otomatik takvimi değiştirmez." +
+            (f"\nℹ️ Anlaşılmayan kelimeler atlandı: {', '.join(ignored)} (/temalar)" if ignored else ""))
         asyncio.create_task(self.do_generate(key, theme.key if theme else None, visual=visual,
                                              series_key=ser.key if ser else None))
 

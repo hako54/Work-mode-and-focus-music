@@ -516,3 +516,15 @@ def test_scene_is_default_and_falls_back_to_fireplace_not_collage(pipe, monkeypa
     assert pipe._background(vid) is not None and pipe._collage(vid) is None  # tek sahne: şömine döngüsü
     from app.themes import find_theme
     assert find_theme("piknik").key == "picnic"
+
+
+def test_natural_turkish_words_in_uret():
+    from app.series import find_series
+    from app.themes import find_theme
+    words = "jazz şömineli oda".split()
+    assert find_series(words[0]).key == "jazz"
+    assert find_theme(words[1]).key == "fireplace"
+    assert find_theme(words[2]) is None and find_series(words[2]) is None   # 'oda' atlanır
+    for w, key in [("yağmurlu", "rain"), ("karlı", "winter"), ("ormanda", "forest"), ("kafede", "cafe"),
+                   ("Şömine", "fireplace"), ("piknik", "picnic"), ("denizde", "seaside")]:
+        assert find_theme(w).key == key, w
