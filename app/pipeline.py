@@ -621,13 +621,34 @@ class Pipeline:
         self.db.update_video(video_id, thumb_path=str(thumb))
         return thumb
 
+    ROTATE_UNIT_SEC = 60  # bg_rotate_*_min ayarları dakika cinsinden (testlerde kısaltılır)
+
+    def _rotation_order(self, first: fireplace.Background, rng: random.Random) -> list[fireplace.Background]:
+        others = [b for b in fireplace.backgrounds() if b.name != first.name]
+        rng.shuffle(others)
+        return [first, *others]
+
     def _compilation_render(self, video_id: int) -> None:
         d = self._dir(f"video_{video_id}")
         bg = self._background(video_id)
-        loop = fireplace.loop_for(bg, (1920, 1080)) if bg else media.make_loop(d / "image.png", d / "loop.mp4")
-        out = media.mux(loop, d / "mix.mp3", d / "video.mp4")
-        if not bg:  # şömine döngüleri önbellekte kalır, tekrar kullanılır
-            loop.unlink(missing_ok=True)
+        audio = d / "mix.mp3"
+        order = self._rotation_order(bg, random.Random(video_id)) if bg else []
+        if len(order) > 1 and self.db.get_setting("bg_rotate") == "1":
+            # Uzun videoda arka plan 20-30 dk'da bir yumuşak geçişle değişir (yeniden kodlama yok).
+            lo = self.db.get_int("bg_rotate_min_min") * self.ROTATE_UNIT_SEC
+            hi = max(lo, self.db.get_int("bg_rotate_max_min") * self.ROTATE_UNIT_SEC)
+            work = d / "rotation"
+            try:
+                playlist = fireplace.rotation_playlist(order, media.duration(audio), (lo, hi),
+                                                       random.Random(video_id), work)
+                out = media.mux_concat(playlist, audio, d / "video.mp4")
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+        else:
+            loop = fireplace.loop_for(bg, (1920, 1080)) if bg else media.make_loop(d / "image.png", d / "loop.mp4")
+            out = media.mux(loop, audio, d / "video.mp4")
+            if not bg:  # şömine döngüleri önbellekte kalır, tekrar kullanılır
+                loop.unlink(missing_ok=True)
         preview = media.make_preview(d / "mix.mp3", d / "preview.mp3", max_seconds=600)
         self.db.update_video(video_id, video_path=str(out), preview_path=str(preview))
         self._compilation_thumb(video_id)

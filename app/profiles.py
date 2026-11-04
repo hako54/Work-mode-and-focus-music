@@ -45,6 +45,9 @@ SETTING_HELP: dict[str, str] = {
     "library_keep_days": "Parça sesleri kaç gün saklansın (0 = hep)",
     "fireplace": "Arka plan şömine döngüsü olsun (1/0; 0 = yapay zeka sahne görseli)",
     "fire_volume": "Ateş çıtırtısı ses seviyesi (0-100, 0 = kapalı)",
+    "bg_rotate": "Uzun videolarda arka plan videolarını sırayla değiştir (1/0)",
+    "bg_rotate_min_min": "Arka plan değişim aralığı en az (dk)",
+    "bg_rotate_max_min": "Arka plan değişim aralığı en çok (dk)",
     "soft_master": "Tiz tonları yumuşat, ani yükselmeleri bastır (1/0)",
     "mix_crossfade_sec": "Mixte parçalar arası geçiş süresi (sn, 4-20)",
     "make_shorts": "Short üret (1/0)",
@@ -167,6 +170,9 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "library_keep_days": "0",  # parçalar derlemeler için hep saklanır (5 dk ≈ 7 MB)
         "fireplace": "1",
         "fire_volume": "20",
+        "bg_rotate": "1",             # uzun videoda birden fazla şömine videosu varsa sırayla değiştir
+        "bg_rotate_min_min": "20",
+        "bg_rotate_max_min": "30",
         "soft_master": "1",
         "mix_crossfade_sec": "12",
     },

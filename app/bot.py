@@ -851,8 +851,10 @@ def validate_setting(key: str, value: str) -> str | None:
         return "1–14 gün arası olmalı"
     if key == "mix_reuse_pct" and not 0 <= n <= 80:
         return "0–80 arası olmalı"
-    if key in ("fireplace", "publish_roll") and n not in (0, 1):
+    if key in ("fireplace", "publish_roll", "bg_rotate") and n not in (0, 1):
         return "0 veya 1 olmalı"
+    if key in ("bg_rotate_min_min", "bg_rotate_max_min") and not 5 <= n <= 120:
+        return "5–120 dk arası olmalı"
     if key == "fire_volume" and not 0 <= n <= 100:
         return "0–100 arası olmalı"
     if key == "soft_master" and n not in (0, 1):

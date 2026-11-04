@@ -147,6 +147,14 @@ def mux(loop: Path, audio: Path, out: Path) -> Path:
     return out
 
 
+def mux_concat(playlist: Path, audio: Path, out: Path) -> Path:
+    """Concat listesindeki video parçalarını (yeniden kodlamadan) sesle birleştir."""
+    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(playlist), "-i", str(audio),
+         "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+         "-t", f"{duration(audio):.3f}", "-movflags", "+faststart", str(out)])
+    return out
+
+
 def fmt_ts(seconds: float) -> str:
     s = int(round(seconds))
     h, rem = divmod(s, 3600)

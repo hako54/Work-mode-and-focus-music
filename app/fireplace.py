@@ -440,6 +440,56 @@ def save_upload(src: Path, original_name: str) -> Background:
     return bg
 
 
+# ---------------------------------------------------------------------------- uzun videoda arka plan değişimi
+ROTATE_XFADE = 2.0  # iki arka plan arasındaki yumuşak geçiş (sn); döngülerin GOP'u (2 sn) ile uyumlu
+
+
+def _transition(a_loop: Path, b_loop: Path, out: Path, x: float = ROTATE_XFADE) -> Path:
+    """A'nın başından (A döngüsü yeni bitti) B'nin sonuna (B döngüsü birazdan başlayacak) yumuşak geçiş."""
+    lb = media.duration(b_loop)
+    fps = media.FPS
+    fc = (f"[0:v]trim=0:{x:.3f},setpts=PTS-STARTPTS,fps={fps}[a];"
+          f"[1:v]trim={lb - x:.3f}:{lb:.3f},setpts=PTS-STARTPTS,fps={fps}[b];"
+          f"[a][b]xfade=transition=fade:duration={x:.3f}:offset=0,format=yuv420p[o]")
+    media.run(["ffmpeg", "-y", "-i", str(a_loop), "-i", str(b_loop), "-filter_complex", fc, "-map", "[o]", "-an",
+               "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(fps * 2),
+               "-pix_fmt", "yuv420p", str(out)])
+    return out
+
+
+def rotation_playlist(order: list[Background], total_sec: float, seg_range: tuple[float, float],
+                      rng: random.Random, workdir: Path, size: tuple[int, int] = (1920, 1080)) -> Path:
+    """Arka planları seg_range (sn) aralığında değiştiren concat listesi; her değişimde yumuşak geçiş.
+
+    Her arka plan kendi döngüsünün tam katı kadar oynar (sonu = başı), geçiş de sonraki arka planın
+    döngü sonundan başına akar; böylece hiçbir yerde atlama olmaz ve uzun video yeniden kodlanmaz.
+    """
+    workdir.mkdir(parents=True, exist_ok=True)
+    # Not: parçalar MP4 olarak birleştirilir; MPEG-TS ile concat ffmpeg 7.0'da çöküyor.
+    loops = [loop_for(b, size) for b in order]
+    lens = [media.duration(lp) for lp in loops]
+    lines: list[str] = []
+    t, i = 0.0, 0
+    while True:
+        k = max(1, round(rng.uniform(*seg_range) / lens[i]))
+        lines += [f"file '{loops[i]}'"] * k
+        t += k * lens[i]
+        if t >= total_sec:
+            break
+        if len(order) < 2:  # tek arka plan: geçişsiz tekrar
+            continue
+        j = (i + 1) % len(order)
+        tr = workdir / f"x_{i}_{j}.mp4"
+        if not tr.exists():
+            _transition(loops[i], loops[j], tr)
+        lines.append(f"file '{tr}'")
+        t += ROTATE_XFADE
+        i = j
+    playlist = workdir / "background.txt"
+    playlist.write_text("\n".join(lines) + "\n")
+    return playlist
+
+
 def direct_url(url: str) -> str:
     """Google Drive / Dropbox paylaşım linkini doğrudan indirme linkine çevir."""
     import re

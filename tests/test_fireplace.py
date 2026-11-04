@@ -140,3 +140,39 @@ def test_html_link_gives_clear_error(monkeypatch):
     monkeypatch.setattr(fireplace.requests, "get", lambda *a, **k: Resp())
     with pytest.raises(ValueError, match="Bağlantıya sahip olan herkes"):
         fireplace.import_url("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view")
+
+
+def test_long_video_rotates_backgrounds_with_crossfades(tmp_path, monkeypatch):
+    """Uzun videoda 3 şömine videosu sırayla, yumuşak geçişlerle değişir; video yeniden kodlanmaz."""
+    for n, color in enumerate(("red", "green", "blue")):
+        src = tmp_path / f"fire{n}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:size=640x360:rate=30:duration=7",
+                        "-f", "lavfi", "-i", "anoisesrc=d=7:c=pink:a=0.2", "-shortest", "-pix_fmt", "yuv420p",
+                        str(src)], check=True, capture_output=True)
+        fireplace.save_upload(src, f"fire{n}.mp4")
+    assert len(fireplace.backgrounds()) == 3
+
+    db = Database(tmp_path / "rot.db")
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: FakeMusic())
+    for k, v in {"daily_min_sec": "60", "daily_max_sec": "60", "mix_min_min": "1", "mix_max_min": "1",
+                 "bg_rotate_min_min": "10", "bg_rotate_max_min": "15"}.items():
+        db.set_setting(k, v)
+    pipe = Pipeline(db)
+    monkeypatch.setattr(pipe, "ROTATE_UNIT_SEC", 1)  # dakika yerine saniye: 10-15 sn'de bir değişim
+    vid = pipe.create_mix(ROMANTIC_STYLES[0].key)
+    out = Path(db.video(vid)["video_path"])
+    audio_len = media.duration(out.parent / "mix.mp3")
+    assert media.duration(out) == pytest.approx(audio_len, abs=1.0)
+
+    # tüm video hatasız çözülebiliyor ve renkler değişiyor (kırmızı -> yeşil -> mavi)
+    dec = subprocess.run(["ffmpeg", "-v", "error", "-i", str(out), "-f", "null", "-"], capture_output=True, text=True)
+    assert dec.stderr.strip() == ""
+    colors = set()
+    for t in range(1, int(audio_len) - 1, 3):
+        px = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(out), "-frames:v", "1",
+                             "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                            capture_output=True).stdout
+        if len(px) == 3:
+            colors.add(max(range(3), key=lambda c: px[c]))
+    assert len(colors) >= 2
+    assert not (out.parent / "rotation").exists()  # geçici geçiş dosyaları temizlendi
