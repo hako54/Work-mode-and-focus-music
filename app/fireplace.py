@@ -391,14 +391,46 @@ def synth_crackle(out: Path, seconds: int | None = None, seed: int = 11) -> Path
 
 
 # ---------------------------------------------------------------------------- yükleme (Telegram)
+KEEP_SECONDS = 45            # arka plan videosundan saklanan süre (döngü ilk 40 sn'yi kullanır)
+MAX_DOWNLOAD = 3 * 1024 ** 3  # bağlantıdan indirmede üst sınır (3 GB)
+
+
+def normalize_video(src: Path, out: Path) -> Path:
+    """4K/HEVC/uzun videoyu 1080p, 30 fps, H.264 ve en fazla KEEP_SECONDS saniyeye indir (ses korunur)."""
+    media.run(["ffmpeg", "-y", "-t", str(KEEP_SECONDS), "-i", str(src),
+               "-vf", "scale=w=1920:h=1080:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                      f"fps={media.FPS},format=yuv420p",
+               "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "160k",
+               "-movflags", "+faststart", str(out)])
+    return out
+
+
+def _file_hash(path: Path) -> str:
+    h = hashlib.sha1(str(path.stat().st_size).encode())
+    with open(path, "rb") as fh:
+        h.update(fh.read(8 * 1024 * 1024))  # büyük dosyalarda yalnızca ilk 8 MB
+    return h.hexdigest()[:6]
+
+
 def save_upload(src: Path, original_name: str) -> Background:
-    """Telegram'dan gelen dosyayı arka plan kütüphanesine kaydet ve doğrula."""
+    """Gelen dosyayı (Telegram, bağlantı) arka plan kütüphanesine kaydet ve doğrula."""
     ext = Path(original_name).suffix.lower() or src.suffix.lower()
     if ext not in IMAGE_EXT | VIDEO_EXT:
         raise ValueError("Desteklenmeyen dosya türü (jpg/png/webp ya da mp4/mov gönderin)")
     stem = "".join(c if c.isalnum() else "_" for c in Path(original_name).stem)[:30] or "upload"
-    dest = user_dir() / f"{stem}_{hashlib.sha1(src.read_bytes()).hexdigest()[:6]}{ext}"
-    shutil.move(str(src), dest)
+    if ext in VIDEO_EXT:  # her videoyu küçült: 4K 300 MB -> 1080p ~30 MB
+        dest = user_dir() / f"{stem}_{_file_hash(src)}.mp4"
+        try:
+            normalize_video(src, dest)
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise
+        finally:
+            src.unlink(missing_ok=True)
+        ext = ".mp4"
+    else:
+        dest = user_dir() / f"{stem}_{_file_hash(src)}{ext}"
+        shutil.move(str(src), dest)
     bg = Background("video" if ext in VIDEO_EXT else "image", dest)
     try:
         loop_for(bg, (1920, 1080))  # şimdi hazırla (önbelleğe girer); hatalıysa hemen söyle
@@ -406,6 +438,51 @@ def save_upload(src: Path, original_name: str) -> Background:
         dest.unlink(missing_ok=True)
         raise
     return bg
+
+
+def direct_url(url: str) -> str:
+    """Google Drive / Dropbox paylaşım linkini doğrudan indirme linkine çevir."""
+    import re
+    url = url.strip()
+    m = re.search(r"drive\.google\.com/(?:file/d/|open\?id=|uc\?(?:export=download&)?id=)([\w-]{10,})", url)
+    if m:
+        return f"https://drive.usercontent.google.com/download?id={m.group(1)}&export=download&confirm=t"
+    if "dropbox.com" in url:
+        url = url.replace("dl=0", "dl=1")
+        return url if "dl=1" in url else url + ("&" if "?" in url else "?") + "dl=1"
+    return url
+
+
+def import_url(url: str) -> Background:
+    """Bağlantıdaki (Drive, Dropbox ya da doğrudan .mp4/.mov) videoyu indirip arka plan olarak ekle."""
+    import re
+    link = direct_url(url)
+    tmp = cache_dir() / f"download_{hashlib.sha1(link.encode()).hexdigest()[:8]}.bin"
+    try:
+        with requests.get(link, stream=True, timeout=(20, 120), allow_redirects=True) as r:
+            r.raise_for_status()
+            ctype = r.headers.get("Content-Type", "").lower()
+            if "text/html" in ctype:
+                raise ValueError("Link bir dosya değil, bir web sayfası açıyor. Google Drive'da dosyayı "
+                                 "'Bağlantıya sahip olan herkes' ile paylaşın ve o linki gönderin.")
+            name = "linked_video.mp4"
+            m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', r.headers.get("Content-Disposition", ""))
+            if m:
+                name = m.group(1)
+            elif Path(link.split("?")[0]).suffix.lower() in VIDEO_EXT | IMAGE_EXT:
+                name = Path(link.split("?")[0]).name
+            if Path(name).suffix.lower() not in VIDEO_EXT | IMAGE_EXT:
+                name = Path(name).stem + (".mov" if "quicktime" in ctype else ".mp4")
+            size = 0
+            with open(tmp, "wb") as fh:
+                for chunk in r.iter_content(4 << 20):
+                    size += len(chunk)
+                    if size > MAX_DOWNLOAD:
+                        raise ValueError("Dosya 3 GB'tan büyük; videoyu kısaltıp tekrar deneyin.")
+                    fh.write(chunk)
+        return save_upload(tmp, name)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def remove(name: str) -> bool:

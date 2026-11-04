@@ -52,6 +52,7 @@ HELP_PRODUCTION = {
 <b>🔥 Şömine</b>
 Bota şömine <b>videosu</b> (10–40 sn, en fazla 20 MB) ya da <b>fotoğrafı</b> gönderin: arka plan döngüsü olur.
 Videonun kendi ateş sesi varsa çıtırtı olarak o kullanılır.
+/video &lt;Drive/Dropbox linki&gt; – büyük (4K, 300 MB+) videoyu linkle ekle; 1080p'ye küçültülür
 /arkaplan – arka planları listele · /arkaplan sil &lt;ad&gt;
 /ayar fireplace 0|1 · /ayar fire_volume 0–100
 """,
@@ -98,7 +99,8 @@ class Bot:
             "ayar": self.cmd_settings, "stiller": self.cmd_styles, "stil": self.cmd_style_toggle,
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
-            "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "arkaplan": self.cmd_backgrounds,
+            "kullanilan": self.cmd_used, "dinle": self.cmd_listen,
+            "video": self.cmd_video_link, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -646,8 +648,8 @@ class Bot:
             f = msg.video or msg.animation or msg.document
             name = getattr(f, "file_name", None) or ("fireplace.mp4" if (msg.video or msg.animation) else "upload")
         if (f.file_size or 0) > 20 * 1024 * 1024:
-            await msg.reply_text("⚠️ Telegram botları 20 MB'tan büyük dosyayı indiremez. Videoyu 10–30 sn'ye "
-                                 "kısaltıp ya da normal (sıkıştırılmış) video olarak tekrar gönderin.")
+            await msg.reply_text("⚠️ Telegram botları 20 MB'tan büyük dosyayı indiremez. Büyük (4K) videoları "
+                                 "Google Drive'a yükleyip linkini gönderin: /video <link>")
             return
         await msg.reply_text("🔥 Alındı. Dikişsiz döngü hazırlanıyor (fotoğrafta ~5 dk, videoda ~1 dk)…")
         suffix = Path(name).suffix or ".bin"
@@ -655,18 +657,36 @@ class Bot:
         try:
             await (await f.get_file()).download_to_drive(tmp)
             bg = await self.run_heavy("şömine arka planı", lambda progress: fireplace.save_upload(tmp, name))
-            loop = fireplace.loop_for(bg, (1920, 1080))
-            note = ("Bu video(lar) varken fotoğraflar kullanılmaz; ateş sesi videonun kendi sesinden alınır "
-                    "(sessizse sentez çıtırtı)." if bg.kind == "video" else
-                    "Fotoğraf alevleri dalgalanan bir döngüye çevrildi.")
-            with open(loop, "rb") as fh:
-                await msg.reply_video(fh, caption=f"✅ Arka plan eklendi: {bg.name}\n{note}\n"
-                                                  f"Toplam: {len(fireplace.backgrounds())} · /arkaplan",
-                                      read_timeout=120, write_timeout=120)
+            await self._reply_background(msg, bg)
         except Exception as e:  # noqa: BLE001
             log.exception("Arka plan yüklenemedi")
             tmp.unlink(missing_ok=True)
             await msg.reply_text(f"⚠️ Arka plan eklenemedi: {str(e)[:500]}")
+
+    async def _reply_background(self, msg, bg) -> None:
+        loop = fireplace.loop_for(bg, (1920, 1080))
+        note = ("Bu video(lar) varken fotoğraflar kullanılmaz; ateş sesi videonun kendi sesinden alınır "
+                "(sessizse sentez çıtırtı)." if bg.kind == "video" else
+                "Fotoğraf hafif ışık titremesiyle döngüye çevrildi.")
+        with open(loop, "rb") as fh:
+            await msg.reply_video(fh, caption=f"✅ Arka plan eklendi: {bg.name}\n{note}\n"
+                                              f"Toplam: {len(fireplace.backgrounds())} · /arkaplan",
+                                  read_timeout=120, write_timeout=120)
+
+    async def cmd_video_link(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/video <link>: Drive/Dropbox/doğrudan link ile büyük (4K, 300 MB+) video ekle."""
+        msg = update.message
+        if not ctx.args or not ctx.args[0].startswith("http"):
+            await msg.reply_text("Kullanım: /video <Google Drive ya da Dropbox paylaşım linki>\n"
+                                 "Drive'da dosyayı 'Bağlantıya sahip olan herkes' ile paylaşın.")
+            return
+        await msg.reply_text("⬇️ Video indiriliyor ve 1080p'ye küçültülüyor (büyük dosyalarda birkaç dakika)…")
+        try:
+            bg = await self.run_heavy("linkten arka plan", lambda progress: fireplace.import_url(ctx.args[0]))
+            await self._reply_background(msg, bg)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Linkten arka plan eklenemedi")
+            await msg.reply_text(f"⚠️ Video eklenemedi: {str(e)[:500]}")
 
     async def cmd_backgrounds(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if len(ctx.args) == 2 and ctx.args[0] == "sil":

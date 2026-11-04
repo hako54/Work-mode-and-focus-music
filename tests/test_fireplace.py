@@ -96,3 +96,47 @@ def test_mix_with_fireplace_and_crackle(tmp_path, monkeypatch):
     db.set_setting("fireplace", "0")
     pipe.regenerate(vid, "image")
     assert pipe._background(vid) is None
+
+
+def test_direct_url_for_drive_and_dropbox():
+    d = fireplace.direct_url("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view?usp=sharing")
+    assert d == "https://drive.usercontent.google.com/download?id=1AbCdEfGhIjKlMnOp&export=download&confirm=t"
+    assert "id=1AbCdEfGhIjKlMnOp" in fireplace.direct_url("https://drive.google.com/open?id=1AbCdEfGhIjKlMnOp")
+    assert fireplace.direct_url("https://www.dropbox.com/s/x/fire.mov?dl=0").endswith("dl=1")
+    assert fireplace.direct_url("https://example.com/fire.mp4") == "https://example.com/fire.mp4"
+
+
+def test_4k_link_import_is_downscaled_to_1080p(tmp_path, monkeypatch):
+    src = tmp_path / "fire4k.mov"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=30:duration=5",
+                    "-f", "lavfi", "-i", "anoisesrc=d=5:c=pink:a=0.3", "-shortest", "-pix_fmt", "yuv420p",
+                    str(src)], check=True, capture_output=True)
+
+    class Resp:
+        headers = {"Content-Type": "video/quicktime", "Content-Disposition": 'attachment; filename="fire4k.mov"'}
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def raise_for_status(self): pass
+        def iter_content(self, n):
+            with open(src, "rb") as fh:
+                while chunk := fh.read(n):
+                    yield chunk
+
+    monkeypatch.setattr(fireplace.requests, "get", lambda *a, **k: Resp())
+    bg = fireplace.import_url("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view")
+    assert bg.kind == "video" and bg.path.suffix == ".mp4"
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height",
+                          "-of", "csv=p=0", str(bg.path)], capture_output=True, text=True).stdout.strip()
+    assert out == "1920,1080"
+    assert fireplace.ambience_bed().name.startswith("fire_audio_")  # ses korunmuş, çıtırtı olarak kullanılıyor
+
+
+def test_html_link_gives_clear_error(monkeypatch):
+    class Resp:
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def raise_for_status(self): pass
+    monkeypatch.setattr(fireplace.requests, "get", lambda *a, **k: Resp())
+    with pytest.raises(ValueError, match="Bağlantıya sahip olan herkes"):
+        fireplace.import_url("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view")
