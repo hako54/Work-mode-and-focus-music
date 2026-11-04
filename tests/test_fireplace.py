@@ -176,3 +176,18 @@ def test_long_video_rotates_backgrounds_with_crossfades(tmp_path, monkeypatch):
             colors.add(max(range(3), key=lambda c: px[c]))
     assert len(colors) >= 2
     assert not (out.parent / "rotation").exists()  # geçici geçiş dosyaları temizlendi
+
+
+def test_own_fireplace_videos_can_be_slowed_and_previewed(tmp_path, monkeypatch):
+    from app.bot import validate_setting
+    src = fire_video(tmp_path / "myfire.mp4", 12)
+    bg = fireplace.save_upload(src, "myfire.mp4")
+    monkeypatch.setattr(fireplace, "BG_SLOW", 1.0)
+    normal = fireplace.loop_for(bg, (640, 360))
+    monkeypatch.setattr(fireplace, "BG_SLOW", 1.5)
+    slow = fireplace.loop_for(bg, (640, 360))
+    assert slow != normal                                    # ayrı önbellek
+    assert media.duration(slow) > media.duration(normal) + 3  # 1.5x yavaş: daha uzun döngü
+    prev = fireplace.preview_of(bg)
+    assert prev.exists() and media.duration(prev) <= 20.5
+    assert validate_setting("bg_slow", "1.25") is None and validate_setting("bg_slow", "3")

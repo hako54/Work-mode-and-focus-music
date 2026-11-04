@@ -620,8 +620,13 @@ class Pipeline:
     def fireplace_on(self) -> bool:
         return self.db.get_setting("fireplace") == "1" and bool(fireplace.backgrounds())
 
+    def _sync_bg_slow(self) -> None:
+        raw = self.db.get_setting("bg_slow")
+        fireplace.BG_SLOW = float(raw) if raw else 1.0
+
     def _background(self, video_id: int) -> fireplace.Background | None:
         """Bu video için seçilmiş şömine arka planı (yoksa None = normal görsel)."""
+        self._sync_bg_slow()
         f = CONFIG.media_dir / f"video_{video_id}" / "background.txt"
         return fireplace.find_background(f.read_text().strip()) if f.exists() else None
 

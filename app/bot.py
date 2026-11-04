@@ -58,7 +58,7 @@ HELP_PRODUCTION = {
 <b>🔥 Arka plan (şömine)</b>
 Bota video/fotoğraf gönder (en fazla 20 MB)
 /video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
-/arkaplan · /arkaplan sil &lt;ad&gt;
+/arkaplan · /arkaplan sil &lt;ad&gt; · /arkaplan yenile [1.25] – yeniden işle + önizleme
 
 <b>✅ Onay</b>
 Kartta: ✅ Onayla (08:00) · ⚡ Hemen yayınla · ❌ Reddet · 🎵 Müzik / 🖼 Görsel / ✏️ Metin yenile
@@ -757,6 +757,9 @@ class Bot:
                                  f"{len(fireplace.backgrounds())} · /arkaplan")
 
     async def cmd_backgrounds(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if ctx.args and ctx.args[0] in ("yenile", "onizle", "önizle"):
+            await self._refresh_backgrounds(update, ctx.args[1:])
+            return
         if len(ctx.args) == 2 and ctx.args[0] == "sil":
             ok = fireplace.remove(ctx.args[1])
             await update.message.reply_text("🗑 Silindi." if ok else "Bulunamadı (repodaki varsayılan fotoğraf silinemez).")
@@ -768,7 +771,42 @@ class Bot:
         await update.message.reply_html(
             f"<b>Şömine arka planları</b> (mod: {state}, çıtırtı: %{self.db.get_setting('fire_volume') or 0})\n"
             + ("\n".join(lines) or "Yok") +
-            "\n\nYeni eklemek için bota video ya da fotoğraf gönderin. Silmek: /arkaplan sil &lt;ad&gt;")
+            f"\nAğır çekim: {self.db.get_setting('bg_slow') or '1.0'}x"
+            "\n\nYeni eklemek için bota video ya da fotoğraf gönderin. Silmek: /arkaplan sil &lt;ad&gt;\n"
+            "Yeniden işle + önizleme: /arkaplan yenile [1.0–2.0]")
+
+    async def _refresh_backgrounds(self, update: Update, args: list[str]) -> None:
+        """/arkaplan yenile [yavaşlık]: şömine videolarını güncel ayarlarla yeniden işle, önizlemelerini gönder."""
+        msg = update.message
+        if args:
+            try:
+                slow = float(args[0].replace(",", "."))
+                assert 1.0 <= slow <= 2.0
+            except (ValueError, AssertionError):
+                await msg.reply_text("Yavaşlık 1.0 ile 2.0 arasında olmalı (ör. /arkaplan yenile 1.25)")
+                return
+            self.db.set_setting("bg_slow", f"{slow:g}")
+        self.pipe._sync_bg_slow()
+        bgs = [b for b in fireplace.backgrounds() if b.path.parent != fireplace.BUNDLED_DIR or b.kind == "video"]
+        if not bgs:
+            await msg.reply_text("Yüklenmiş şömine videosu yok. /video <link> ile ekleyin.")
+            return
+        await msg.reply_text(f"🔄 {len(bgs)} arka plan {fireplace.BG_SLOW:g}x hızla yeniden işleniyor; "
+                             "her biri hazır olunca önizlemesi gelecek…")
+        for n, bg in enumerate(bgs, 1):
+            try:
+                prev = await self.run_heavy(f"arka plan {n}/{len(bgs)}", lambda progress, b=bg: fireplace.preview_of(b))
+                loop_len = media.duration(fireplace.loop_for(bg, (1920, 1080)))
+                with open(prev, "rb") as fh:
+                    await msg.reply_video(fh, supports_streaming=True, read_timeout=120, write_timeout=120,
+                                          caption=f"🎬 {n}/{len(bgs)} · {bg.name}\n"
+                                                  f"{'🐢 ' + format(fireplace.BG_SLOW, 'g') + 'x ağır çekim · ' if bg.kind == 'video' and fireplace.BG_SLOW > 1 else ''}"
+                                                  f"döngü {loop_len:.0f} sn (uzun videolarda bu döngü tekrar eder)")
+            except Exception as e:  # noqa: BLE001
+                log.exception("Arka plan yenilenemedi")
+                await msg.reply_text(f"⚠️ {bg.name} işlenemedi: {str(e)[:300]}")
+        await msg.reply_text("✅ Bitti. Daha yavaş/hızlı denemek için: /arkaplan yenile 1.0 · 1.25 · 1.5\n"
+                             "Seçtiğiniz değer kaydedildi; yeni uzun videolarda bu kullanılır.")
 
     async def cmd_library(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         lines = []
@@ -880,6 +918,11 @@ class Bot:
 def validate_setting(key: str, value: str) -> str | None:
     if key == "compilation_fill":
         return None if value in ("repeat", "generate") else "repeat ya da generate olmalı"
+    if key == "bg_slow":
+        try:
+            return None if 1.0 <= float(value.replace(",", ".")) <= 2.0 else "1.0–2.0 arası olmalı"
+        except ValueError:
+            return "sayı olmalı (ör. 1.25)"
     if key == "daily_visual":
         ok = ("both", "scene", "collage", "fireplace", "image")
         return None if value in ok else "both, scene, collage, fireplace ya da image olmalı"

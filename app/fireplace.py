@@ -116,19 +116,42 @@ def still_frame(bg: Background, out: Path, size: tuple[int, int] = (1920, 1080))
     return out
 
 
+BG_SLOW = 1.0  # şömine videolarının ağır çekim katsayısı (ayar: bg_slow; pipeline/bot günceller)
+
+
 def loop_for(bg: Background, size: tuple[int, int]) -> Path:
-    """Arka plan için (önbellekli) dikişsiz döngü klibi."""
+    """Arka plan için (önbellekli) dikişsiz döngü klibi; videolara BG_SLOW kadar ağır çekim uygulanır."""
     w, h = size
-    out = cache_dir() / f"loop_{_key(bg.path, w, h, LOOP_CRF, 'flicker-v2')}.mp4"
+    slow = round(max(1.0, BG_SLOW), 2) if bg.kind == "video" else 1.0
+    extra = ("flicker-v2",) if slow == 1.0 else ("flicker-v2", f"slow{slow}")
+    out = cache_dir() / f"loop_{_key(bg.path, w, h, LOOP_CRF, *extra)}.mp4"
     if out.exists():
         return out
     tmp = out.with_suffix(".tmp.mp4")
     if bg.kind == "video":
-        seamless_video_loop(bg.path, tmp, size)
+        src = bg.path
+        slowed = out.with_suffix(".slow.mp4")
+        try:
+            if slow > 1.0:  # sakin: ateşi hafifçe yavaşlat (40 sn'lik döngüye yetecek kadar kaynak)
+                src_len = min(media.duration(bg.path), 41.5 / slow)
+                media.run(["ffmpeg", "-y", "-t", f"{src_len:.2f}", "-i", str(bg.path),
+                           "-vf", f"setpts={slow:.4f}*PTS,fps={media.FPS},format=yuv420p", "-an",
+                           "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", str(slowed)])
+                src = slowed
+            seamless_video_loop(src, tmp, size)
+        finally:
+            slowed.unlink(missing_ok=True)
     else:
         animate_fire(bg.path, tmp, size)
     tmp.rename(out)
     return out
+
+
+def preview_of(bg: Background, seconds: float = 20.0) -> Path:
+    """Arka plan döngüsünün Telegram için küçük önizlemesi (sessiz)."""
+    loop = loop_for(bg, (1920, 1080))
+    return media.make_video_preview(loop, loop.with_name(f"preview_{loop.stem}.mp4"), start=0.0,
+                                    seconds=min(seconds, media.duration(loop)), height=480)
 
 
 def seamless_video_loop(src: Path, out: Path, size: tuple[int, int], max_seconds: float = 40.0,
