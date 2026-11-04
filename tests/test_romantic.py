@@ -503,3 +503,16 @@ def test_card_video_previews_follow_regenerated_visuals(pipe):
     v = db.video(vid)
     previews = asyncio.run(bot._video_previews(v, [c for c in db.children(vid) if c["status"] == "pending"]))
     assert previews[0][0].stat().st_mtime > first_mtime  # önizleme de yenilendi
+
+
+def test_scene_is_default_and_falls_back_to_fireplace_not_collage(pipe, monkeypatch):
+    from app import stock
+    db = pipe.db
+    assert db.get_setting("daily_visual") == "scene"
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch_scene", lambda *a: None)            # uygun klip bulunamadı
+    monkeypatch.setattr(stock, "fetch", lambda *a: (_ for _ in ()).throw(AssertionError("kolaj olmamalı")))
+    vid = pipe.create_daily(series_key="romance", theme_key="picnic")
+    assert pipe._background(vid) is not None and pipe._collage(vid) is None  # tek sahne: şömine döngüsü
+    from app.themes import find_theme
+    assert find_theme("piknik").key == "picnic"

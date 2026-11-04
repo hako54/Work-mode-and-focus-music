@@ -60,6 +60,10 @@ Derlemede parçalar en popüler olanla başlar ve enerji seviyesi en yakın par�
 
 Uzun derlemeler de seri bazındadır (bir derlemede tek seri) ve seriler arasında sırayla döner. Telegram: `/seriler`, `/uret jazz kafe sahne`, `/uret uyku`, `/derleme sleep`.
 
+**Varsayılan: tek sahne.** Kısa videolar temaya uygun tek, sıcak bir mekânın ağır çekim döngüsüdür (şömineli oda, karlı dağ evi, yağmurlu pencere, kafe, sonbahar pikniği…). Uygun klip bulunamazsa şömine döngüsüne geçilir. Kolaj isteğe bağlı: `/uret … kolaj` ya da `/ayar daily_visual both`.
+
+**Yapay zeka etiketi:** YouTube, yapay zekayla üretilen müziğin beyan edilmesini zorunlu tutuyor; bu yüzden yüklemelerde `containsSyntheticMedia` açık kalır. YouTube'a göre beyan erişimi ve para kazanmayı etkilemez.
+
 **İki video tarzı (sırayla):** (1) **Tek sahne** — temaya uygun tek, sinematik bir mekân (şömineli oturma odası, mum ışığında akşam yemeği, yağmurlu pencere, karlı dağ evi…) atlamasız döngüde; (2) **Kolaj** — temadaki kısa klip ve fotoğraflar. `/uret sonbahar sahne` ya da `/uret deniz kolaj` ile seçilebilir; `/ayar daily_visual scene|collage|both`. Müzik her zaman küçük, uyumlu bir topluluktur (piyano + yaylılar, akustik gitar, yumuşak saksafon/çello, pad, hafif fırça davul). Başlıklar: *"<özgün duygusal ifade> ❤️ Romantic Love Music by the Fire | Cozy Night Ambience"* kalıbında, açıklamalar "Perfect for:" maddeli.
 
 **Temalar ve görüntü:** Her parça bir temayla üretilir (deniz kenarı, sonbahar, orman, yağmur, kış, gün batımı, çiçek bahçesi, yıldızlı gece, göl, mum ışığı). Müzik talimatı temanın havasını anlatır; kısa videonun görüntüsü o temadaki Pexels kliplerinden ve fotoğraflarından yumuşak geçişli, atlamasız dönen bir **kolajdır** (aynı klip iki kez kullanılmaz). Uzun derlemelerde **şömine döngüsü** + çıtırtı kullanılır. Pexels anahtarı yoksa kısa videolarda da şömineye geçilir. Ücretsiz anahtar: pexels.com/api → `PEXELS_API_KEY`. Yayın saati 08:00; onay 08:00'den sonra gelirse ertesi sabah 08:00'e zamanlanır.

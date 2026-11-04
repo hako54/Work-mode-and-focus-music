@@ -35,7 +35,8 @@ SERIES: tuple[Series, ...] = (
         ("romantic_solo_piano", "piano_strings_love", "moonlight_piano", "piano_cello_romance",
          "candlelight_jazz_piano", "wedding_piano", "rainy_romance_piano", "classical_romance_piano",
          "dreamy_ambient_love", "fireside_love_ballad", "romantic_sax_lounge", "acoustic_love_guitar"),
-        ("autumn", "winter", "candlelight", "sunset", "seaside", "flowers", "rain", "night_sky", "lake", "forest"),
+        ("autumn", "winter", "candlelight", "sunset", "seaside", "flowers", "rain", "night_sky", "lake", "forest",
+         "picnic"),
         "",
         ("Romantic evenings & date nights", "Couples & intimate moments", "Wine & candlelit dinners",
          "Cozy nights at home", "Relaxing after a long day", "Reading & quiet time", "Late-night relaxation",
@@ -50,7 +51,7 @@ SERIES: tuple[Series, ...] = (
         "jazz", "Cozy Jazz", "☕", "Cozy Jazz Music",
         ("cozy_jazz_cafe", "rainy_jazz_night", "bossa_nova_evening", "romantic_sax_lounge",
          "candlelight_jazz_piano"),
-        ("cafe", "rain", "city_night", "candlelight", "autumn", "winter", "sunset"),
+        ("cafe", "rain", "city_night", "candlelight", "autumn", "winter", "sunset", "picnic"),
         "Cozy smooth jazz for a relaxing evening at home or in a quiet café: soft swing feel, warm upright bass, "
         "gentle brushed drums, mellow piano, saxophone or guitar sharing the melody, relaxed and laid-back, "
         "warm and intimate sound. " + _SOFT + " " + _ENSEMBLE,
@@ -82,7 +83,7 @@ SERIES: tuple[Series, ...] = (
     Series(
         "relax", "Rahatlama", "🍃", "Relaxing Music",
         ("spa_massage_piano", "nature_relax_piano", "healing_meditation", "acoustic_love_guitar"),
-        ("forest", "lake", "seaside", "flowers", "sunset"),
+        ("forest", "lake", "seaside", "flowers", "sunset", "picnic"),
         "Calm relaxing music for stress relief, spa, massage, yoga and meditation: soft piano, warm strings, "
         "gentle pads and light natural textures, slow and peaceful, spacious and healing. " + _SOFT + " "
         + _ENSEMBLE,

@@ -158,7 +158,7 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "daily_every_days": "3",
         "publish_time": "08:00",
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
-        "daily_visual": "both",       # kısa videolar: both (sırayla sahne/kolaj) | scene | collage | fireplace | image
+        "daily_visual": "scene",      # kısa videolar: scene (tek sıcak mekân, döngü) | both | collage | fireplace | image
         "daily_min_sec": "270",
         "daily_max_sec": "330",
         "compilation_every_days": "15",

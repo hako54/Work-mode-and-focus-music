@@ -67,6 +67,11 @@ THEMES: tuple[Theme, ...] = (
           "a calm mountain lake at dawn with mist on still water",
           ("calm lake morning mist", "mountain lake reflection", "lake sunrise"),
           ("lake reflection", "misty lake", "wooden dock lake"), "🏞"),
+    Theme("picnic", "Sonbahar pikniği",
+          "a quiet autumn picnic in the forest with golden leaves slowly falling",
+          "an autumn picnic in a quiet forest with a blanket, a basket and golden leaves",
+          ("autumn picnic forest", "picnic blanket autumn leaves", "autumn park picnic"),
+          ("autumn picnic", "picnic basket leaves", "autumn forest blanket"), "🧺"),
     Theme("cafe", "Kafe",
           "a cozy café on a rainy evening, warm lamps and quiet conversations",
           "a cozy café at night with warm lamps, coffee cups and rain on the window",
@@ -87,7 +92,7 @@ THEMES: tuple[Theme, ...] = (
 THEME_BY_KEY = {t.key: t for t in THEMES}
 
 # Başlıklarda kullanılan İngilizce adlar
-EN_LABEL = {"cafe": "Café", "city_night": "City Lights", "seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
+EN_LABEL = {"picnic": "Autumn Picnic", "cafe": "Café", "city_night": "City Lights", "seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
             "winter": "Winter", "sunset": "Sunset", "flowers": "Rose Garden", "night_sky": "Starry Night",
             "lake": "Lakeside", "candlelight": "Candlelight"}
 
@@ -105,7 +110,7 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
     "wedding_piano": ("flowers", "sunset", "seaside"),
     "fireside_love_ballad": ("autumn", "winter", "forest", "rain"),
     "romantic_sax_lounge": ("candlelight", "night_sky", "rain"),
-    "acoustic_love_guitar": ("seaside", "sunset", "flowers", "lake"),
+    "acoustic_love_guitar": ("seaside", "sunset", "flowers", "lake", "picnic"),
     "cozy_jazz_cafe": ("cafe", "city_night", "rain"),
     "rainy_jazz_night": ("rain", "cafe", "city_night"),
     "bossa_nova_evening": ("seaside", "sunset", "cafe"),
@@ -116,7 +121,7 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
 }
 
 
-ALIASES = {"kafe": "cafe", "cafe": "cafe", "kahve": "cafe", "sehir": "city_night", "şehir": "city_night",
+ALIASES = {"piknik": "picnic", "picnic": "picnic", "kafe": "cafe", "cafe": "cafe", "kahve": "cafe", "sehir": "city_night", "şehir": "city_night",
            "city": "city_night", "deniz": "seaside", "sahil": "seaside", "plaj": "seaside", "kar": "winter", "kis": "winter",
            "kış": "winter", "snow": "winter", "orman": "forest", "yagmur": "rain", "yağmur": "rain",
            "sonbahar": "autumn", "fall": "autumn", "gunbatimi": "sunset", "günbatımı": "sunset", "gun": "sunset",
@@ -138,16 +143,16 @@ SCENES: dict[str, Scene] = {
     "seaside": Scene(("beach house terrace sunset", "seaside terrace evening", "beach sunset waves"),
                      "by the Sea", "Seaside Sunset Ambience",
                      "a quiet seaside terrace at sunset with soft waves and warm lanterns"),
-    "autumn": Scene(("cozy fireplace living room", "autumn cabin fireplace", "fireplace night cozy"),
+    "autumn": Scene(("cozy fireplace living room", "fireplace armchair cozy night", "autumn cabin fireplace"),
                     "by the Fire", "Cozy Autumn Night Ambience",
                     "a cozy living room by a crackling fireplace on an autumn night, armchair and warm lamps"),
-    "forest": Scene(("forest cabin fireplace", "cabin in the woods night", "cozy cabin interior"),
+    "forest": Scene(("cozy cabin in the woods", "forest cabin fireplace", "autumn forest path calm"),
                     "in a Forest Cabin", "Cozy Cabin Ambience",
                     "a warm wooden cabin in the forest at night with a glowing fireplace"),
-    "rain": Scene(("rain window cozy room night", "rain on window night", "rainy night window lamp"),
+    "rain": Scene(("rain window cozy room", "rain on window night lamp", "rainy window candle"),
                   "on a Rainy Night", "Rainy Night Ambience",
                   "a cozy room on a rainy night, raindrops on the window and soft lamp light"),
-    "winter": Scene(("cabin fireplace snow window", "snowy night cabin", "winter fireplace cozy"),
+    "winter": Scene(("snowy cabin window fireplace", "snow falling cozy cabin", "winter fireplace snow outside"),
                     "on a Snowy Night", "Winter Cabin Ambience",
                     "a warm cabin with a fireplace while snow falls softly outside the window"),
     "sunset": Scene(("sunset terrace wine", "golden hour balcony", "sunset view terrace"),
@@ -162,6 +167,9 @@ SCENES: dict[str, Scene] = {
     "lake": Scene(("lake house dock sunset", "lake cabin evening", "calm lake sunset"),
                   "by the Lake", "Lakeside Evening Ambience",
                   "a wooden lake house dock at dusk with calm water and soft lights"),
+    "picnic": Scene(("autumn picnic forest", "picnic blanket autumn leaves", "autumn forest picnic basket"),
+                    "at an Autumn Picnic", "Autumn Forest Ambience",
+                    "a quiet autumn picnic in the forest, a blanket, a basket and golden leaves slowly falling"),
     "cafe": Scene(("cozy cafe night rain", "coffee shop interior evening", "cafe window rain night"),
                   "in a Cozy Café", "Rainy Café Ambience",
                   "a cozy café at night with warm lamps, a cup of coffee and rain on the window"),

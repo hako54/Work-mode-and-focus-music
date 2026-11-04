@@ -233,10 +233,11 @@ class Pipeline:
                     self.db.set_setting("last_daily_visual", "scene")
                     return SCENES[theme.key].text
             except Exception as e:  # noqa: BLE001
-                log.warning("Tek sahne hazırlanamadı, kolaja geçiliyor: %s", str(e)[-600:])
+                log.warning("Tek sahne hazırlanamadı, yedeğe geçiliyor: %s", str(e)[-600:])
             for f in ("collage.mp4", "collage_v.mp4", "visual.txt"):
                 (d / f).unlink(missing_ok=True)
-            mode = "collage"
+            # "both" modunda kolaja, "scene" modunda yine tek sahne olan şömine döngüsüne geç
+            mode = "collage" if (visual or self.db.get_setting("daily_visual")) == "both" else "fireplace"
         if mode == "collage" and theme and stock.available():
             progress(f"🎞 {theme.emoji} {theme.label} temalı klipler hazırlanıyor")
             try:
