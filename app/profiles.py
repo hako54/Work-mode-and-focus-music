@@ -34,6 +34,9 @@ SETTING_HELP: dict[str, str] = {
     "compilation_every_days": "Derleme sıklığı (gün)",
     "compilation_min_min": "Derleme en kısa süre (dk)",
     "compilation_max_min": "Derleme en uzun süre (dk)",
+    "sleep_compilation_min_min": "Uyku serisi derlemesi en kısa süre (dk)",
+    "sleep_compilation_max_min": "Uyku serisi derlemesi en uzun süre (dk)",
+    "compilation_min_tracks": "Derleme için serideki en az farklı parça sayısı (azsa tekrar çok olur)",
     "daily_every_days": "Kaç günde bir yeni parça videosu üretilsin",
     "boost_until": "Yoğun dönem bitişi (YYYY-AA-GG; boş = kapalı) — /yogun 30",
     "boost_generate_times": "Yoğun dönemde üretim saatleri (virgülle)",
@@ -175,9 +178,12 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "daily_visual": "scene",      # kısa videolar: scene (tek sıcak mekân, döngü) | both | collage | fireplace | image
         "daily_min_sec": "270",
         "daily_max_sec": "330",
-        "compilation_every_days": "15",
-        "compilation_min_min": "80",
+        "compilation_every_days": "7",        # uzun video haftada bir (kredisiz; hazır parçalar)
+        "compilation_min_min": "120",         # 2-3 saat
         "compilation_max_min": "180",
+        "sleep_compilation_min_min": "180",   # uyku serisi: 3-4 saat (gece boyu açık kalır)
+        "sleep_compilation_max_min": "240",
+        "compilation_min_tracks": "6",        # bir seride en az bu kadar farklı parça yoksa derleme yapılmaz
         "compilation_fill": "repeat",  # derleme kısa kalırsa parçaları tekrarla (kredi harcamaz)
         "mix_every_days": "2",
         "mix_min_min": "80",

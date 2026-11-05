@@ -38,8 +38,9 @@ def test_defaults_short_tracks_and_long_compilations(tmp_path):
     assert profiles.current().main_kind == "daily"
     assert db.get_int("daily_every_days") == 3
     assert 270 <= db.get_int("daily_min_sec") <= db.get_int("daily_max_sec") <= 330
-    assert db.get_int("compilation_every_days") == 15
-    assert db.get_int("compilation_min_min") == 80 and db.get_int("compilation_max_min") == 180
+    assert db.get_int("compilation_every_days") == 7
+    assert db.get_int("compilation_min_min") == 120 and db.get_int("compilation_max_min") == 180
+    assert db.get_int("sleep_compilation_min_min") == 180 and db.get_int("compilation_min_tracks") == 6
     assert db.get_setting("compilation_fill") == "repeat"
 
 
@@ -194,6 +195,9 @@ def test_daily_with_fireplace_and_crackle_then_free_compilation(pipe, monkeypatc
 
     db.set_setting("compilation_min_min", "1")
     db.set_setting("compilation_max_min", "1")
+    db.set_setting("sleep_compilation_min_min", "1")
+    db.set_setting("sleep_compilation_max_min", "1")
+    db.set_setting("compilation_min_tracks", "2")
     cid = pipe.create_compilation()
     assert len(calls) == made  # derleme kredi harcamadı
     rows = db.query("SELECT track_id FROM compilation_tracks WHERE video_id = ?", (cid,))
@@ -445,6 +449,9 @@ def test_compilations_are_per_series(pipe):
         db.update_video(vid, status="published", views=10)
     db.set_setting("compilation_min_min", "1")
     db.set_setting("compilation_max_min", "1")
+    db.set_setting("sleep_compilation_min_min", "1")
+    db.set_setting("sleep_compilation_max_min", "1")
+    db.set_setting("compilation_min_tracks", "2")
     cid = pipe.create_compilation()
     c = db.video(cid)
     assert c["series"] == "jazz"                      # sıradaki (romance'ın 2 parçası yok) -> jazz
@@ -679,3 +686,19 @@ def test_scene_mode_by_theme(pipe, monkeypatch):
     d2 = Path(db.video(rain)["video_path"]).parent
     assert (d2 / "scene_loop.txt").read_text() == "sequence"
     assert {r["provider_id"] for r in db.query("SELECT provider_id FROM stock_used")} >= {"v1", "s0", "s1"}
+
+
+def test_long_videos_wait_for_enough_distinct_tracks(pipe):
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    for _ in range(3):
+        vid = pipe.create_daily(series_key="jazz")
+        pipe.approve(vid)
+        db.update_video(vid, status="published", views=5)
+    assert not pipe.compilation_ready()                      # 3 < 6 farklı parça: otomatik derleme bekler
+    with pytest.raises(ValueError, match="farklı parça"):
+        pipe.create_compilation()
+    assert pipe.compilation_range("sleep") == (180 * 60, 240 * 60)
+    assert pipe.compilation_range("jazz") == (120 * 60, 180 * 60)
+    db.set_setting("compilation_min_tracks", "3")
+    assert pipe.compilation_ready()

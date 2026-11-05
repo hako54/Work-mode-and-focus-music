@@ -567,15 +567,36 @@ class Pipeline:
         order = list(series_mod.ORDER)
         i = order.index(start.key)
         for key in order[i:] + order[:i]:
-            if counts.get(key, 0) >= 2:
+            if counts.get(key, 0) >= self._min_tracks():
                 return key
         return max(counts, key=counts.get) if counts else None
+
+    def compilation_ready(self) -> bool:
+        """Otomatik derleme için en az bir seride yeterli farklı parça var mı?"""
+        if profiles.current().key != "romantic":
+            return True
+        key = self.compilation_series()
+        if not key:
+            return False
+        return len({c["id"] for c in self.select_compilation_tracks(series_key=key)}) >= self._min_tracks()
+
+    def _min_tracks(self) -> int:
+        raw = self.db.get_setting("compilation_min_tracks")
+        return int(raw) if raw else 2
+
+    def compilation_range(self, series_key: str | None) -> tuple[int, int]:
+        """Derleme süresi (sn): uyku serisinde daha uzun (3-4 saat)."""
+        lo, hi = self.db.get_int("compilation_min_min"), self.db.get_int("compilation_max_min")
+        if series_key == "sleep" and self.db.get_setting("sleep_compilation_min_min"):
+            lo = self.db.get_int("sleep_compilation_min_min")
+            hi = self.db.get_int("sleep_compilation_max_min")
+        return lo * 60, max(lo, hi) * 60
 
     def select_compilation_tracks(self, now: datetime | None = None, series_key: str | None = None) -> list[dict]:
         """En çok dinlenen parçaları seç, sonra kulağa akıcı gelecek sırayla diz (series_key: yalnızca o seri)."""
         now = now or utcnow()
         every = self.db.get_int("compilation_every_days")
-        max_sec = self.db.get_int("compilation_max_min") * 60
+        max_sec = self.compilation_range(series_key)[1]
         rows = self.db.query(
             "SELECT t.*, v.views, v.likes, v.publish_at, v.created_at AS v_created FROM tracks t "
             "JOIN videos v ON v.track_id = t.id AND v.kind = 'daily' AND v.status IN ('published', 'scheduled') "
@@ -614,9 +635,13 @@ class Pipeline:
 
     def create_compilation(self, progress: Progress = _noop, series_key: str | None = None) -> int:
         rng = random.Random()
-        min_sec = self.db.get_int("compilation_min_min") * 60
         x = float(self.db.get_setting("mix_crossfade_sec") or 6)
         comp_series = self.compilation_series(series_key)
+        min_sec, max_range = self.compilation_range(comp_series)
+        n_tracks = len({c["id"] for c in self.select_compilation_tracks(series_key=comp_series)})
+        if comp_series and n_tracks < self._min_tracks() and not series_key:
+            raise ValueError(f"Henüz hiçbir seride {self._min_tracks()} farklı parça yok; uzun video için parça "
+                             "birikmesi bekleniyor (/kullanilan).")
         if comp_series:
             ser = series_mod.get(comp_series)
             progress(f"{ser.emoji} {ser.label} serisinin en çok dinlenenleri derleniyor")
@@ -628,7 +653,7 @@ class Pipeline:
             if not chosen:
                 raise ValueError("Derlenecek yayınlanmış parça yok; önce birkaç parça videosu yayınlanmalı.")
             lo = min_sec
-            hi = max(lo, self.db.get_int("compilation_max_min") * 60)
+            hi = max(lo, max_range)
             target = rng.randint(lo, hi)
             base = list(chosen)
             if len(base) > 2 and base[0]["id"] == base[-1]["id"]:

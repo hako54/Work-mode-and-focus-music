@@ -1080,6 +1080,9 @@ class Bot:
     async def job_compilation(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self.paused() or not self.pipe.compilation_due():
             return
+        if not self.pipe.compilation_ready():  # parça birikene kadar sessizce bekle (her hafta hata atmasın)
+            log.info("Derleme için yeterli parça yok; bekleniyor")
+            return
         if self.db.one("SELECT id FROM videos WHERE kind = 'compilation' AND status IN ('pending', 'building')"):
             return
         await self.do_compilation()
@@ -1175,8 +1178,11 @@ def validate_setting(key: str, value: str) -> str | None:
         return "60–600 sn arası olmalı"
     if key == "short_seconds" and not 15 <= n <= 59:
         return "15–59 sn arası olmalı"
-    if key in ("compilation_min_min", "compilation_max_min") and not 10 <= n <= 180:
-        return "10–180 dk arası olmalı"
+    if key in ("compilation_min_min", "compilation_max_min", "sleep_compilation_min_min",
+               "sleep_compilation_max_min") and not 10 <= n <= 480:
+        return "10–480 dk arası olmalı"
+    if key == "compilation_min_tracks" and not 1 <= n <= 30:
+        return "1–30 arası olmalı"
     if key in ("mix_min_min", "mix_max_min") and not 30 <= n <= 360:
         return "30–360 dk arası olmalı"
     if key == "mix_every_days" and not 1 <= n <= 30:

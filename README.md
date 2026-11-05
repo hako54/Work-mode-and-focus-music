@@ -74,6 +74,8 @@ Uzun derlemeler de seri bazındadır (bir derlemede tek seri) ve seriler arasın
 
 **Yoğun dönem (`/yogun 30`):** Belirtilen gün boyunca günde 2 video (üretim 09:00 ve 16:00, yayın 08:00 ve 18:00; iki video aynı saate düşmez). Otomatik üretim önce kullanılmamış hazır parçaları videoya çevirir (kredisiz), bitince yeni parça üretir. ElevenLabs kredisi `credit_reserve` (15.000) altına inerse yeni üretim durur ve bot haber verir. Süre bitince normal düzene döner; `/yogun kapat` ile erken kapatılır.
 
+**Uzun videolar (asıl ürün):** Haftada bir, seri bazında, **2–3 saat** (uyku serisi **3–4 saat**). Kredi harcamaz; hazır parçalar en çok dinlenenden başlayarak birleştirilir ve gerekirse tekrarlanır. Aşırı tekrarı önlemek için bir seride en az 6 farklı parça birikmeden otomatik derleme yapılmaz (`compilation_min_tracks`). Elle istenirse `/derleme <seri>` her zaman çalışır. Kısa videolar ve Short'lar bu uzun videolara trafik getiren vitrin işlevi görür; Studio'da kısa videolara bitiş ekranı (end screen) ile son uzun videoyu eklemeniz önerilir.
+
 **Maliyet:** Kredi yalnızca 5 dk'lık parçalarda harcanır (parça başına ~2.600–4.400 kredi). 3 günde bir ≈ ayda 10 parça ≈ 30–45 bin kredi. Uzun derlemeler ücretsizdir. Kalan krediyi Telegram'da `/test` gösterir. `/ayar daily_every_days 2` sıklığı artırır (ayda ~65 bin kredi). İsteğe bağlı `/mix [dk]` tamamen yeni parçalardan uzun mix üretir (dakikada ~600–900 kredi).
 
 Her parça bir romantik piyano stilinde üretilir; derlemede enerji seviyesi yakın parçalar art arda gelir.
