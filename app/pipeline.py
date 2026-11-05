@@ -53,17 +53,53 @@ class Pipeline:
         raw = self.db.get_setting("disabled_styles")
         return {s for s in raw.split(",") if s}
 
+    def boost_active(self, now: datetime | None = None) -> bool:
+        """/yogun dönemi sürüyor mu (boost_until tarihine kadar, o gün dahil)."""
+        raw = self.db.get_setting("boost_until")
+        if not raw:
+            return False
+        try:
+            until = datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            return False
+        return (now or utcnow()).astimezone(self.tz).date() <= until
+
+    def _times(self, raw: str) -> list[time]:
+        out = []
+        for part in raw.split(","):
+            try:
+                hh, mm = (int(x) for x in part.strip().split(":"))
+                out.append(time(hh, mm))
+            except ValueError:
+                continue
+        return sorted(out)
+
+    def publish_slots(self, now: datetime | None = None) -> list[time]:
+        if self.boost_active(now):
+            return self._times(self.db.get_setting("boost_publish_times")) or self._times("08:00,18:00")
+        return self._times(self.db.get_setting("publish_time"))
+
     def next_publish_at(self, now: datetime | None = None) -> datetime | None:
-        """Bugünün yayın saati henüz geçmediyse o zaman; geçtiyse None (= hemen yayınla)."""
+        """Sıradaki boş yayın saati. Tek saat varsa: bugünkü saat geçtiyse (publish_roll=1) yarın, yoksa None.
+
+        Birden fazla saat varsa (yoğun dönem) zaten zamanlanmış bir videonun 1 saat yakınındaki saatler atlanır;
+        böylece günde 2 video aynı saate düşmez."""
         now = now or utcnow()
-        hh, mm = (int(x) for x in self.db.get_setting("publish_time").split(":"))
         local = now.astimezone(self.tz)
-        target = datetime.combine(local.date(), time(hh, mm), tzinfo=self.tz)
-        # YouTube zamanlanmış yayın için en az birkaç dakika ileri bir zaman ister.
-        if target - now > timedelta(minutes=15):
-            return target
-        if self.db.get_setting("publish_roll") == "1":  # ör. 08:00 geçti -> yarın 08:00
-            return datetime.combine(local.date() + timedelta(days=1), time(hh, mm), tzinfo=self.tz)
+        slots = self.publish_slots(now)
+        taken = [parse_iso(r["publish_at"]) for r in self.db.query(
+            "SELECT publish_at FROM videos WHERE kind != 'short' AND status IN ('scheduled', 'uploading') "
+            "AND publish_at IS NOT NULL")] if len(slots) > 1 else []
+        roll = self.db.get_setting("publish_roll") == "1" or len(slots) > 1
+        for day in range(0, 8 if roll else 1):
+            for t in slots:
+                target = datetime.combine(local.date() + timedelta(days=day), t, tzinfo=self.tz)
+                # YouTube zamanlanmış yayın için en az birkaç dakika ileri bir zaman ister.
+                if target - now <= timedelta(minutes=15):
+                    continue
+                if any(abs((target - x).total_seconds()) < 3600 for x in taken if x):
+                    continue
+                return target
         return None
 
     # ------------------------------------------------------------------ daily
@@ -136,7 +172,15 @@ class Pipeline:
                                 -(d["likes"] or 0), -d["id"]))
         return out
 
-    def create_daily_from_track(self, track_id: int, progress: Progress = _noop) -> int:
+    def create_auto_daily(self, progress: Progress = _noop) -> int:
+        """Otomatik üretim: önce kullanılmamış hazır parçalar (kredisiz), yoksa yeni parça."""
+        unused = self.unused_tracks()
+        if unused:
+            progress(f"♻️ Hazır parça kullanılıyor (#{unused[0]['id']}, kalan {len(unused) - 1}) — kredi harcanmaz")
+            return self.create_daily_from_track(unused[0]["id"], progress, auto=True)
+        return self.create_daily(progress=progress, auto=True)
+
+    def create_daily_from_track(self, track_id: int, progress: Progress = _noop, auto: bool = False) -> int:
         """Kütüphanedeki hazır bir parçadan video yap (yeni müzik üretmez, kredi harcamaz)."""
         rng = random.Random()
         t = self.db.track(track_id)
@@ -147,7 +191,7 @@ class Pipeline:
         if not t["series"]:
             self.db.update_track(track_id, series=ser.key)
         video_id = self.db.add_video(kind="daily", track_id=track_id, style_key=style.key, status="building",
-                                     source="manual", series=ser.key)
+                                     source="auto" if auto else "manual", series=ser.key)
         try:
             scene = self._daily_visuals(video_id, style, rng, progress)
             progress("✍️ Başlık ve açıklama yazılıyor")

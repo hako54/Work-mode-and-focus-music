@@ -45,6 +45,7 @@ HELP_PRODUCTION = {
 /uret [seri] [tema] [sahne|kolaj] – yeni parça + Short (kredi harcar; takvimi kaydırmaz)
    ör. /uret jazz kafe sahne · /uret uyku yagmur · /uret sonbahar
 /derleme [seri] – en çok dinlenenlerden uzun video (kredisiz)
+/yogun [gün] – o kadar gün günde 2 video (önce hazır parçalar) · /yogun kapat
 /mix [dk] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
 
 <b>🎧 Parçalar</b>
@@ -110,7 +111,7 @@ class Bot:
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
-            "video": self.cmd_video_link, "arkaplan": self.cmd_backgrounds,
+            "video": self.cmd_video_link, "yogun": self.cmd_boost, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -177,8 +178,14 @@ class Bot:
             jq.run_daily(self.job_mix, gen, name="mix")
             jq.run_daily(self.job_prune, time(4, 0, tzinfo=self.tz), name="prune")
         else:
-            jq.run_daily(self.job_daily, gen, name="daily")
+            jq.run_daily(self.job_daily, gen, name="daily", data=0)
+            if self.pipe.boost_active():  # /yogun: günde 2 üretim (ör. 09:00 ve 16:00)
+                times = self.pipe._times(self.db.get_setting("boost_generate_times")) or [time(16, 0)]
+                for n, t in enumerate(t for t in times if (t.hour, t.minute) != (gh, gm)):
+                    jq.run_daily(self.job_daily, time(t.hour, t.minute, tzinfo=self.tz), name=f"daily_{n + 2}",
+                                 data=n + 1)
             jq.run_daily(self.job_compilation, comp, name="compilation")
+            jq.run_daily(self.job_reschedule, time(0, 5, tzinfo=self.tz), name="reschedule")
         jq.run_repeating(self.job_stats, interval=6 * 3600, first=120, name="stats")
         jq.run_repeating(self.job_reminders, interval=1800, first=300, name="reminders")
         jq.run_daily(self.job_weekly, time(10, 0, tzinfo=self.tz), days=(1,), name="weekly")
@@ -688,7 +695,7 @@ class Bot:
                 await update.message.reply_text(f"Geçersiz değer: {err}")
                 return
             self.db.set_setting(key, value)
-            if key == "generate_time":
+            if key in ("generate_time", "boost_until", "boost_generate_times"):
                 self.schedule_jobs()
             await update.message.reply_text(f"✅ {key} = {value}")
             return
@@ -897,17 +904,80 @@ class Bot:
         await update.message.reply_text("▶️ Otomasyon sürüyor.")
 
     # ------------------------------------------------------------------ jobs
+    async def job_reschedule(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Gece yarısı: yoğun dönem başladı/bittiyse üretim saatlerini yeniden kur."""
+        self.schedule_jobs()
+
     async def job_daily(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self.paused():
             return
+        slot = (ctx.job.data if ctx and ctx.job else 0) or 0
+        boost = self.pipe.boost_active()
+        if slot > 0 and not boost:
+            return  # yoğun dönem bitti: yalnızca ana saat çalışır
         today = datetime.now(self.tz).date()
-        for r in self.db.query("SELECT created_at FROM videos WHERE kind = 'daily' "
-                               "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 3"):
-            if parse_iso(r["created_at"]).astimezone(self.tz).date() == today:
-                return  # bugün zaten elle üretilmiş
-        if not self.pipe.daily_due():
-            return  # daily_every_days dolmadı (romantic: 3 günde bir)
-        await self.do_generate(auto=True)
+        autos_today = sum(1 for r in self.db.query(
+            "SELECT created_at FROM videos WHERE kind = 'daily' AND COALESCE(source, 'auto') = 'auto' "
+            "AND status NOT IN ('rejected', 'failed') ORDER BY id DESC LIMIT 5")
+            if parse_iso(r["created_at"]).astimezone(self.tz).date() == today)
+        if boost:
+            if autos_today > slot:
+                return  # bu saatin videosu zaten üretilmiş
+        else:
+            if autos_today:
+                return
+            if not self.pipe.daily_due():
+                return  # daily_every_days dolmadı (romantic: 3 günde bir)
+        await self.do_auto_daily()
+
+    async def do_auto_daily(self) -> None:
+        """Önce kullanılmamış hazır parçalar (kredisiz); bitince kredi yeterliyse yeni parça."""
+        if not self.pipe.unused_tracks() and CONFIG.elevenlabs_api_key:
+            reserve = int(self.db.get_setting("credit_reserve") or 0)
+            try:
+                left, _ = await asyncio.to_thread(elevenlabs_credits)
+            except Exception as e:  # noqa: BLE001 — okunamazsa üretim denenir
+                log.warning("ElevenLabs kredisi okunamadı: %s", e)
+                left = None
+            if left is not None and left < reserve:
+                today = datetime.now(self.tz).date().isoformat()
+                if self.db.get_setting("credit_warned") != today:
+                    self.db.set_setting("credit_warned", today)
+                    await self.notify(
+                        f"⛽ ElevenLabs kredisi azaldı ({left:,} < {reserve:,}); yeni parça üretimi durduruldu.\n"
+                        "Kota yenilenince otomatik devam eder. Bu arada /parcalar ya da /derleme kredisiz çalışır. "
+                        "Eşiği değiştirmek: /ayar credit_reserve 5000")
+                return
+        try:
+            vid = await self.run_heavy("otomatik video", self.pipe.create_auto_daily)
+            await self.send_card(vid)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Otomatik üretim hatası")
+            await self.notify(f"⚠️ Otomatik video üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
+
+    async def cmd_boost(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/yogun [gün|kapat]: belirtilen gün boyunca günde 2 video."""
+        arg = (ctx.args[0].lower() if ctx.args else "30")
+        if arg in ("kapat", "0", "off"):
+            self.db.set_setting("boost_until", "")
+            self.schedule_jobs()
+            await update.message.reply_text("⏹ Yoğun dönem kapatıldı; normal düzen (3 günde bir) sürüyor.")
+            return
+        if not arg.isdigit() or not 1 <= int(arg) <= 90:
+            await update.message.reply_text("Kullanım: /yogun 30 (1–90 gün) · /yogun kapat")
+            return
+        until = datetime.now(self.tz).date() + timedelta(days=int(arg) - 1)
+        self.db.set_setting("boost_until", until.isoformat())
+        self.schedule_jobs()
+        unused = len(self.pipe.unused_tracks())
+        gens = self.db.get_setting("boost_generate_times")
+        pubs = self.db.get_setting("boost_publish_times")
+        await update.message.reply_html(
+            f"🚀 <b>Yoğun dönem</b>: {until:%d.%m.%Y} tarihine kadar günde 2 video.\n"
+            f"Üretim: {gens} · Yayın: {pubs}\n"
+            f"Önce {unused} kullanılmamış hazır parça videoya çevrilecek (kredisiz), sonra yeni parça üretilecek.\n"
+            f"Kredi {int(self.db.get_setting('credit_reserve') or 0):,} altına inerse yeni üretim durur ve haber veririm.\n"
+            "Kapatmak: /yogun kapat")
 
     async def job_mix(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self.paused() or not self.pipe.mix_due():
@@ -985,6 +1055,17 @@ class Bot:
 def validate_setting(key: str, value: str) -> str | None:
     if key == "compilation_fill":
         return None if value in ("repeat", "generate") else "repeat ya da generate olmalı"
+    if key == "boost_until":
+        if value in ("", "-"):
+            return None
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+            return None
+        except ValueError:
+            return "YYYY-AA-GG biçiminde olmalı (ör. 2026-12-05) ya da /yogun 30 kullanın"
+    if key in ("boost_generate_times", "boost_publish_times"):
+        import re
+        return None if re.fullmatch(r"\d{1,2}:\d{2}(,\s*\d{1,2}:\d{2})*", value) else "ör. 09:00,16:00"
     if key == "bg_slow":
         try:
             return None if 1.0 <= float(value.replace(",", ".")) <= 2.0 else "1.0–2.0 arası olmalı"

@@ -528,3 +528,62 @@ def test_natural_turkish_words_in_uret():
     for w, key in [("yağmurlu", "rain"), ("karlı", "winter"), ("ormanda", "forest"), ("kafede", "cafe"),
                    ("Şömine", "fireplace"), ("piknik", "picnic"), ("denizde", "seaside")]:
         assert find_theme(w).key == key, w
+
+
+def test_boost_two_publish_slots_without_collisions(pipe):
+    db = pipe.db
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    db.set_setting("boost_until", tomorrow)
+    assert pipe.boost_active()
+    noon = datetime.now(timezone.utc).replace(hour=9, minute=0, second=0, microsecond=0)   # İstanbul 12:00
+    first = pipe.next_publish_at(noon)
+    assert first.astimezone(pipe.tz).strftime("%H:%M") == "18:00"
+    vid = pipe.create_daily(ROMANTIC_STYLES[0].key)
+    db.update_video(vid, status="scheduled", publish_at=iso(first))                       # 18:00 doldu
+    second = pipe.next_publish_at(noon)
+    assert second.astimezone(pipe.tz).strftime("%H:%M") == "08:00" and second.date() > first.date()
+    db.set_setting("boost_until", "")
+    assert not pipe.boost_active()
+
+
+def test_auto_daily_uses_unused_tracks_first(pipe, monkeypatch):
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    tid = db.add_track(style_key=ROMANTIC_STYLES[0].key, prompt="p", exclusive=1, name="Leftover")
+    pipe._make_track_audio(tid, 60)
+    calls = []
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: (calls.append(1), FakeMusic())[1])
+    v1 = pipe.create_auto_daily()
+    assert db.video(v1)["track_id"] == tid and db.video(v1)["source"] == "auto" and not calls  # kredisiz
+    v2 = pipe.create_auto_daily()
+    assert db.video(v2)["track_id"] != tid and calls                                         # sonra yeni
+
+
+def test_boost_job_makes_two_per_day(pipe, monkeypatch):
+    import asyncio
+    from app.bot import Bot
+    db = pipe.db
+    db.set_setting("boost_until", (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d"))
+    bot = Bot.__new__(Bot)
+    bot.db, bot.pipe, bot.tz = db, pipe, pipe.tz
+    made = []
+
+    async def fake_auto():
+        vid = pipe.create_daily(ROMANTIC_STYLES[0].key, auto=True)
+        made.append(vid)
+    bot.do_auto_daily = fake_auto
+    bot.paused = lambda: False
+
+    class Job:
+        def __init__(self, slot): self.data = slot
+    class Ctx:
+        def __init__(self, slot): self.job = Job(slot)
+
+    db.set_setting("daily_visual", "fireplace")
+    asyncio.run(bot.job_daily(Ctx(0)))
+    asyncio.run(bot.job_daily(Ctx(0)))   # aynı saat ikinci kez çalışırsa yeni video yok
+    asyncio.run(bot.job_daily(Ctx(1)))   # ikinci saat
+    assert len(made) == 2
+    db.set_setting("boost_until", "")
+    asyncio.run(bot.job_daily(Ctx(1)))   # yoğun dönem bitince ikinci saat çalışmaz
+    assert len(made) == 2

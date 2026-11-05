@@ -35,6 +35,10 @@ SETTING_HELP: dict[str, str] = {
     "compilation_min_min": "Derleme en kısa süre (dk)",
     "compilation_max_min": "Derleme en uzun süre (dk)",
     "daily_every_days": "Kaç günde bir yeni parça videosu üretilsin",
+    "boost_until": "Yoğun dönem bitişi (YYYY-AA-GG; boş = kapalı) — /yogun 30",
+    "boost_generate_times": "Yoğun dönemde üretim saatleri (virgülle)",
+    "boost_publish_times": "Yoğun dönemde yayın saatleri (virgülle)",
+    "credit_reserve": "Bu kadar ElevenLabs kredisi kalınca yeni parça üretimi durur",
     "publish_roll": "Yayın saati geçtiyse ertesi güne zamanla (1/0; 0 = hemen yayınla)",
     "daily_visual": "Kısa video görüntüsü: both (sırayla) | scene (tek sahne) | collage (klip kolajı) | fireplace | image",
     "compilation_fill": "Derleme kısa kalırsa: repeat = parçaları tekrarla (kredisiz), generate = yeni parça üret",
@@ -157,6 +161,10 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
     ),
     extra_settings={
         "daily_every_days": "3",
+        "boost_until": "",                    # /yogun: bu tarihe kadar (YYYY-AA-GG) günde 2 video
+        "boost_generate_times": "09:00,16:00",
+        "boost_publish_times": "08:00,18:00",
+        "credit_reserve": "15000",            # ElevenLabs kredisi bunun altına inerse yeni üretim durur
         "publish_time": "08:00",
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
         "daily_visual": "scene",      # kısa videolar: scene (tek sıcak mekân, döngü) | both | collage | fireplace | image
