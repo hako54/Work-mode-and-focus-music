@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 _SOFT = ("No bright, thin, piercing or high-pitched notes, no sharp attacks, no sudden changes or loud moments. "
-         "Slow fade-in intro and long soft fade-out ending.")
+         "Slow fade-in intro and long soft fade-out ending. Begin softly on the home (tonic) chord and end by "
+         "resolving gently back onto the tonic chord, letting a warm consonant chord ring out at the very end.")
 _ENSEMBLE = ("Arranged for a small harmonious ensemble, not a single solo instrument, all blending smoothly "
              "together.")
 

@@ -48,20 +48,24 @@ def master_audio(src: Path, out: Path, fade_in: float = 2.0, fade_out: float = 5
     return out
 
 
-def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0, bed: Path | None = None,
+def crossfade_concat(sources: list[Path], out: Path, xfade: float | list[float] = 6.0, bed: Path | None = None,
                      bed_volume: float = 0.3) -> list[float]:
     """Parçaları crossfade ile birleştir. Her parçanın başlangıç saniyesini döndürür.
 
+    xfade: tek süre ya da her geçiş için ayrı süre (armonik uyuma göre, bkz. app.harmony).
     bed verilirse (ör. ateş çıtırtısı) baştan sona döngüyle müziğin altına karıştırılır.
     """
     if not sources:
         raise MediaError("Birleştirilecek parça yok")
     durs = [duration(p) for p in sources]
+    fades = list(xfade) if isinstance(xfade, (list, tuple)) else [float(xfade)] * max(0, len(sources) - 1)
+    # bir geçiş, iki parçadan kısa olanın üçte birini aşmasın
+    fades = [min(f, durs[i] / 3, durs[i + 1] / 3) for i, f in enumerate(fades)]
     starts, t = [], 0.0
-    for d in durs:
+    for i, d in enumerate(durs):
         starts.append(round(t, 2))
-        t += d - xfade
-    total = t + xfade
+        t += d - (fades[i] if i < len(fades) else 0.0)
+    total = t
 
     cmd = ["ffmpeg", "-y"]
     for p in sources:
@@ -69,7 +73,7 @@ def crossfade_concat(sources: list[Path], out: Path, xfade: float = 6.0, bed: Pa
     parts, prev = [], "[0:a]"
     for i in range(1, len(sources)):
         label = f"[a{i}]"
-        parts.append(f"{prev}[{i}:a]acrossfade=d={xfade}:c1=qsin:c2=qsin{label}")  # eşit güçlü, yumuşak geçiş
+        parts.append(f"{prev}[{i}:a]acrossfade=d={fades[i - 1]:.2f}:c1=qsin:c2=qsin{label}")  # eşit güçlü geçiş
         prev = label
     if bed is not None and bed_volume > 0:
         cmd += ["-stream_loop", "-1", "-i", str(bed)]

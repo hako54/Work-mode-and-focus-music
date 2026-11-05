@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import fireplace, media, metadata, profiles, stock, visuals
+from . import fireplace, harmony, media, metadata, profiles, stock, visuals
 from . import series as series_mod
 from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
@@ -631,7 +631,24 @@ class Pipeline:
                 continue
             chosen.append(s)
             total += s["duration"] - 6
-        return order_for_flow(chosen)
+        return self._flow(chosen)
+
+    def _flow(self, tracks: list[dict]) -> list[dict]:
+        """Romantic: biten notaya en uyumlu başlayan parça gelsin (ses analizi); focus: enerjiye göre."""
+        if profiles.current().key == "romantic":
+            try:
+                return harmony.order(tracks)
+            except Exception as e:  # noqa: BLE001 — analiz başarısızsa eski sıralama
+                log.warning("Armonik sıralama yapılamadı: %s", e)
+        return order_for_flow(tracks)
+
+    def _fades(self, paths: list[Path], base: float) -> list[float] | float:
+        if profiles.current().key == "romantic":
+            try:
+                return harmony.transitions(paths, base)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Geçiş uyumu ölçülemedi: %s", e)
+        return base
 
     def create_compilation(self, progress: Progress = _noop, series_key: str | None = None) -> int:
         rng = random.Random()
@@ -679,7 +696,7 @@ class Pipeline:
                 chosen.append({"id": tid, "style_key": style.key, "name": t["name"], "duration": t["duration_sec"],
                                "audio_path": t["audio_path"], "score": 0.0, "fresh": True, "used": False})
                 total += t["duration_sec"] - x
-            chosen = order_for_flow(chosen)
+            chosen = self._flow(chosen)
 
         styles = [c["style_key"] for c in chosen]
         main_style = STYLE_BY_KEY[max(set(styles), key=styles.count)]
@@ -692,7 +709,8 @@ class Pipeline:
             d = self._dir(f"video_{video_id}")
             vol = self._fire_volume() if self.fireplace_on() else 0
             bed = fireplace.ambience_bed() if vol > 0 else None
-            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3", xfade=x,
+            paths = [Path(c["audio_path"]) for c in chosen]
+            starts = media.crossfade_concat(paths, d / "mix.mp3", xfade=self._fades(paths, x),
                                             bed=bed, bed_volume=vol / 100)
             with self.db.tx() as c:
                 for pos, (ch, st) in enumerate(zip(chosen, starts)):
@@ -1003,6 +1021,8 @@ class Pipeline:
                 total += t["duration_sec"] - x
 
             chosen = spread_in(fresh, reused)
+            if len(chosen) > 2 and not reused:  # yalnızca yeni parçalar: armonik sıraya diz
+                chosen = self._flow(chosen)
             progress(f"🎚 {len(chosen)} parça crossfade ile birleştiriliyor ({media.fmt_long(total)})")
             d = self._dir(f"video_{video_id}")
             vol = self.db.get_int("fire_volume") if self.db.get_setting("fire_volume") else 0
@@ -1010,7 +1030,8 @@ class Pipeline:
             if vol > 0:
                 progress("🔥 Ateş çıtırtısı sesi hazırlanıyor")
                 bed = fireplace.ambience_bed()
-            starts = media.crossfade_concat([Path(c["audio_path"]) for c in chosen], d / "mix.mp3", xfade=x,
+            paths = [Path(c["audio_path"]) for c in chosen]
+            starts = media.crossfade_concat(paths, d / "mix.mp3", xfade=self._fades(paths, x),
                                             bed=bed, bed_volume=vol / 100)
             with self.db.tx() as c:
                 for pos, (ch, st) in enumerate(zip(chosen, starts)):
