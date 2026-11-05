@@ -40,6 +40,7 @@ SETTING_HELP: dict[str, str] = {
     "boost_publish_times": "Yoğun dönemde yayın saatleri (virgülle)",
     "credit_reserve": "Bu kadar ElevenLabs kredisi kalınca yeni parça üretimi durur",
     "publish_roll": "Yayın saati geçtiyse ertesi güne zamanla (1/0; 0 = hemen yayınla)",
+    "thumb_style": "Kapak: people (çift/kadın fotoğrafı, 3 aday) | scene (videodan kare)",
     "daily_visual": "Kısa video görüntüsü: both (sırayla) | scene (tek sahne) | collage (klip kolajı) | fireplace | image",
     "compilation_fill": "Derleme kısa kalırsa: repeat = parçaları tekrarla (kredisiz), generate = yeni parça üret",
     "mix_every_days": "Kaç günde bir uzun mix üretilsin",
@@ -167,6 +168,7 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "credit_reserve": "15000",            # ElevenLabs kredisi bunun altına inerse yeni üretim durur
         "publish_time": "08:00",
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
+        "thumb_style": "people",      # kapak: people (temaya uygun çift/kadın fotoğrafı) | scene (videodan kare)
         "daily_visual": "scene",      # kısa videolar: scene (tek sıcak mekân, döngü) | both | collage | fireplace | image
         "daily_min_sec": "270",
         "daily_max_sec": "330",

@@ -587,3 +587,40 @@ def test_boost_job_makes_two_per_day(pipe, monkeypatch):
     db.set_setting("boost_until", "")
     asyncio.run(bot.job_daily(Ctx(1)))   # yoğun dönem bitince ikinci saat çalışmaz
     assert len(made) == 2
+
+
+def test_people_thumbnail_candidates_and_choice(pipe, monkeypatch):
+    from PIL import Image
+    from app import stock
+    from app.themes import people_queries
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    asked = []
+
+    def fake_photos(queries, dest, used, rng, n=3):
+        asked.append(queries)
+        dest.mkdir(parents=True, exist_ok=True)
+        out = []
+        for i in range(n):
+            p = dest / f"p{i}.jpg"
+            Image.new("RGB", (1600, 900), (180 + i * 20, 90, 120)).save(p)
+            out.append(stock.StockItem(f"p{i}", "photo", p))
+        return out
+
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch_photos", fake_photos)
+    vid = pipe.create_daily(series_key="jazz", theme_key="cafe")
+    opts = pipe.thumb_options(vid)
+    assert [int(p.stem.split("_")[1]) for p in opts] == [0, 1, 2, 3]
+    assert db.video(vid)["thumb_path"].endswith("thumb_1.jpg")            # varsayılan: insanlı 1. aday
+    assert asked[0] == people_queries("cafe", "jazz") and "woman" in asked[0][0]
+    assert Image.open(opts[1]).size == (1280, 720)
+
+    pipe.set_thumb(vid, 0)
+    pipe.regenerate(vid, "meta")                                           # metin değişse de seçim korunur
+    assert db.video(vid)["thumb_path"].endswith("thumb_0.jpg") and len(asked) == 1  # yeniden indirilmez
+    assert db.one("SELECT COUNT(*) n FROM stock_used WHERE theme = 'thumb'")["n"] == 3
+
+    db.set_setting("thumb_style", "scene")
+    vid2 = pipe.create_daily(series_key="sleep")
+    assert [int(p.stem.split("_")[1]) for p in pipe.thumb_options(vid2)] == [0]

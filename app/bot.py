@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import html
+import shutil
 import logging
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -46,6 +47,7 @@ HELP_PRODUCTION = {
    ör. /uret jazz kafe sahne · /uret uyku yagmur · /uret sonbahar
 /derleme [seri] – en çok dinlenenlerden uzun video (kredisiz)
 /yogun [gün] – o kadar gün günde 2 video (önce hazır parçalar) · /yogun kapat
+/kapakornek [tema] [seri] – örnek kapaklar (çift/kadın fotoğraflı, kredisiz)
 /mix [dk] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
 
 <b>🎧 Parçalar</b>
@@ -111,7 +113,8 @@ class Bot:
             "duraklat": self.cmd_pause, "devam": self.cmd_resume, "kutuphane": self.cmd_library,
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
-            "video": self.cmd_video_link, "yogun": self.cmd_boost, "arkaplan": self.cmd_backgrounds,
+            "video": self.cmd_video_link, "yogun": self.cmd_boost,
+            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -228,6 +231,7 @@ class Bot:
         if kind not in LONG_KINDS:
             regen.insert(0, InlineKeyboardButton("🎵 Müzik", callback_data=f"rm:{vid}"))
         rows.append(regen)
+        rows.append([InlineKeyboardButton("🖼 Kapak seç", callback_data=f"tc:{vid}")])
         return InlineKeyboardMarkup(rows)
 
     async def send_card(self, vid: int) -> None:
@@ -268,6 +272,72 @@ class Bot:
                     await self.app.bot.send_audio(uid, f, title=v["title"] or "preview", performer=profiles.channel_name(),
                                                   read_timeout=120, write_timeout=120)
             await self.app.bot.send_message(uid, f"#{vid} için karar:", reply_markup=self._keyboard(vid, v["kind"]))
+
+    async def send_thumb_choices(self, vid: int) -> None:
+        """Kapak adaylarını (0 = videodan sahne, 1-3 = çift/kadın fotoğrafları) albüm olarak gönder + seçim düğmeleri."""
+        opts = self.pipe.thumb_options(vid)
+        if not opts:
+            await self.notify(f"#{vid} için kapak adayı yok.")
+            return
+        current = (self.db.video(vid)["thumb_path"] or "")
+        labels = {0: "Sahne"}
+        entries = []
+        for p in opts:
+            n = int(p.stem.split("_")[1])
+            mark = " ✅ şu an" if str(p) == current else ""
+            entries.append((p, f"{n} · {labels.get(n, 'Aday ' + str(n))}{mark}"))
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(labels.get(int(p.stem.split('_')[1]),
+                                                                    f"Aday {p.stem.split('_')[1]}"),
+                                                         callback_data=f"ts:{vid}:{p.stem.split('_')[1]}")
+                                    for p in opts]])
+        for uid in CONFIG.admin_ids:
+            handles = [open(p, "rb") for p, _ in entries]
+            try:
+                await self.app.bot.send_media_group(uid, [InputMediaPhoto(h, caption=c) for h, (_, c) in
+                                                          zip(handles, entries)], read_timeout=120, write_timeout=120)
+            finally:
+                for h in handles:
+                    h.close()
+            await self.app.bot.send_message(uid, f"#{vid} için kapak seçin "
+                                                 "(YouTube Studio'da 'Test & Compare' ile de deneyebilirsiniz):",
+                                            reply_markup=kb)
+
+    async def cmd_cover_examples(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/kapakornek [tema] [seri]: video üretmeden, kredi harcamadan örnek kapaklar."""
+        from . import stock, visuals
+        from .themes import THEME_BY_KEY, people_queries
+        theme = next((find_theme(a) for a in ctx.args if find_theme(a)), None)
+        ser = next((find_series(a) for a in ctx.args if find_series(a)), None)
+        if not stock.available():
+            await update.message.reply_text("PEXELS_API_KEY yok; kapak fotoğrafı aranamıyor.")
+            return
+        theme = theme or THEME_BY_KEY["fireplace"]
+        await update.message.reply_text(f"🔎 {theme.emoji} {theme.label}" + (f" · {ser.emoji} {ser.label}" if ser else "")
+                                        + " için örnek kapaklar hazırlanıyor…")
+        work = fireplace.cache_dir() / "thumb_examples"
+        shutil.rmtree(work, ignore_errors=True)
+
+        def build(progress):
+            import random as _r
+            items = stock.fetch_photos(people_queries(theme.key, ser.key if ser else None), work, set(), _r.Random())
+            head = {"jazz": "COZY JAZZ", "sleep": "DEEP SLEEP", "relax": "RELAX"}.get(ser.key if ser else "",
+                                                                                     "LOVE BY THE FIRE")
+            return [visuals.make_thumbnail(it.path, work / f"ex_{n}.jpg", head, EN_LABEL[theme.key].upper())
+                    for n, it in enumerate(items, 1)]
+        try:
+            paths = await self.run_heavy("örnek kapak", build)
+            if not paths:
+                await update.message.reply_text("Uygun fotoğraf bulunamadı; başka bir tema deneyin (/temalar).")
+                return
+            handles = [open(p, "rb") for p in paths]
+            try:
+                await update.message.reply_media_group([InputMediaPhoto(h, caption=f"Örnek {n}")
+                                                        for n, h in enumerate(handles, 1)])
+            finally:
+                for h in handles:
+                    h.close()
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
     async def _video_previews(self, v, shorts) -> list[tuple[Path, str]]:
         """Ana video (~20 sn) ve Short (~15 sn) için küçük önizlemeler; hata olursa kart yine gider."""
@@ -365,10 +435,23 @@ class Bot:
         if action == "bgr":  # arka plan puanı: bgr:<id>:<0-5>
             await self.on_bg_rating(q, raw)
             return
+        if action == "ts":  # kapak seçimi: ts:<vid>:<n>
+            vid_s, _, n = raw.partition(":")
+            try:
+                self.pipe.set_thumb(int(vid_s), int(n))
+                await q.answer("Kapak seçildi")
+                await q.edit_message_text(f"✅ #{vid_s} kapağı: {'videodan sahne' if n == '0' else 'aday ' + n}. "
+                                          "Yüklemede bu kullanılacak.")
+            except Exception as e:  # noqa: BLE001
+                await q.answer(str(e)[:150])
+            return
         vid = int(raw)
         await q.answer()
         if action in ("tv", "td"):  # kütüphane parçası: videoya çevir / sil
             await self.on_track_button(q, action, vid)
+            return
+        if action == "tc":  # kapak adaylarını göster
+            await self.send_thumb_choices(vid)
             return
         try:
             v = self.db.video(vid)

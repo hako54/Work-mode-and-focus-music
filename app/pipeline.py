@@ -16,7 +16,7 @@ from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
 from .styles import STYLE_BY_KEY, Style, active_styles, build_image_prompt, build_music_prompt, pick_style
-from .themes import EN_LABEL, SCENES, THEME_BY_KEY, Theme, pick_theme
+from .themes import EN_LABEL, SCENES, THEME_BY_KEY, Theme, people_queries, pick_theme
 
 log = logging.getLogger(__name__)
 MIX_XFADE = 6.0          # uzun mixte parçalar arası crossfade (sn)
@@ -420,8 +420,10 @@ class Pipeline:
         out = media.mux(loop, audio, d / "video.mp4")
         if not bg and not collage:  # şömine döngüleri önbellekte, kolaj klasörde kalır
             loop.unlink(missing_ok=True)
-        thumb = visuals.make_thumbnail(Path(t["image_path"]), d / "thumb.jpg", v["thumbnail_text"] or "FOCUS",
-                                       STYLE_BY_KEY[v["style_key"]].label)
+        ser_key = (t["series"] or v["series"]) if "series" in t.keys() else None
+        thumb = self._thumb_candidates(video_id, Path(t["image_path"]), v["thumbnail_text"] or "FOCUS",
+                                       STYLE_BY_KEY[v["style_key"]].label, people_queries(t["theme"], ser_key)
+                                       if profiles.current().key == "romantic" else ())
         preview = media.make_preview(audio, d / "preview.mp3")
         self.db.update_video(video_id, video_path=str(out), thumb_path=str(thumb), preview_path=str(preview))
 
@@ -727,9 +729,50 @@ class Pipeline:
         _, total = self._compilation_tracklist(video_id)
         style = STYLE_BY_KEY.get(v["style_key"] or "", active_styles()[0])
         sub = media.fmt_long(total).upper() + (" MIX" if v["kind"] == "compilation" else "")
-        thumb = visuals.make_thumbnail(d / "image.png", d / "thumb.jpg", v["thumbnail_text"] or style.thumb_word, sub)
+        queries = people_queries("fireplace", v["series"]) if profiles.current().key == "romantic" else ()
+        return self._thumb_candidates(video_id, d / "image.png", v["thumbnail_text"] or style.thumb_word, sub,
+                                      queries)
+
+    def _thumb_candidates(self, video_id: int, scene_image: Path, headline: str, subline: str,
+                          queries: tuple[str, ...]) -> Path:
+        """Kapak adayları: 0 = videodan kare, 1..3 = temaya uygun çift/kadın fotoğrafları (Pexels).
+
+        Fotoğraflar bir kez indirilir (thumb_src_N.jpg); metin değişince yalnızca yazı yeniden basılır.
+        Varsayılan kapak: thumb_style=people ise 1. aday, yoksa sahne."""
+        d = self._dir(f"video_{video_id}")
+        cands = [visuals.make_thumbnail(scene_image, d / "thumb_0.jpg", headline, subline)]
+        srcs = sorted(d.glob("thumb_src_*.jpg"))
+        if not srcs and queries and stock.available() and self.db.get_setting("thumb_style") == "people":
+            used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}
+            items = stock.fetch_photos(queries, d / "thumb_dl", used, random.Random(video_id))
+            for n, it in enumerate(items, 1):
+                shutil.move(str(it.path), d / f"thumb_src_{n}.jpg")
+            with self.db.tx() as c:
+                for it in items:
+                    c.execute("INSERT OR IGNORE INTO stock_used(provider_id, theme, used_at) VALUES (?, ?, ?)",
+                              (it.provider_id, "thumb", iso(utcnow())))
+            shutil.rmtree(d / "thumb_dl", ignore_errors=True)
+            srcs = sorted(d.glob("thumb_src_*.jpg"))
+        for src in srcs:
+            n = src.stem.rsplit("_", 1)[1]
+            cands.append(visuals.make_thumbnail(src, d / f"thumb_{n}.jpg", headline, subline))
+        chosen_file = d / "thumb_choice.txt"
+        choice = int(chosen_file.read_text()) if chosen_file.exists() else (1 if len(cands) > 1 else 0)
+        thumb = cands[choice] if choice < len(cands) else cands[0]
         self.db.update_video(video_id, thumb_path=str(thumb))
         return thumb
+
+    def thumb_options(self, video_id: int) -> list[Path]:
+        d = CONFIG.media_dir / f"video_{video_id}"
+        return [p for p in (d / f"thumb_{n}.jpg" for n in range(0, 4)) if p.exists()]
+
+    def set_thumb(self, video_id: int, n: int) -> Path:
+        opts = {int(p.stem.split("_")[1]): p for p in self.thumb_options(video_id)}
+        if n not in opts:
+            raise ValueError("Böyle bir kapak adayı yok")
+        (CONFIG.media_dir / f"video_{video_id}" / "thumb_choice.txt").write_text(str(n))
+        self.db.update_video(video_id, thumb_path=str(opts[n]))
+        return opts[n]
 
     ROTATE_UNIT_SEC = 60  # bg_rotate_*_min ayarları dakika cinsinden (testlerde kısaltılır)
 

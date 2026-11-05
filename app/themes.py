@@ -205,6 +205,39 @@ def _variants(text: str) -> list[str]:
     return out
 
 
+# Kapak fotoğrafı aramaları: temaya uygun, insan içeren (çift / kadın), sıcak ve romantik — müstehcen değil.
+PEOPLE_QUERIES: dict[str, tuple[str, ...]] = {
+    "fireplace": ("couple by fireplace blanket", "woman reading by fireplace", "couple cozy fireplace night"),
+    "autumn": ("couple autumn park walk", "woman autumn leaves smiling", "couple autumn forest"),
+    "winter": ("couple snow winter romantic", "woman cozy window snow", "couple winter cabin"),
+    "rain": ("woman rain window coffee", "couple umbrella rain", "woman looking at rain window"),
+    "cafe": ("woman coffee cafe window", "couple cafe date", "woman cafe rainy day"),
+    "city_night": ("couple city lights night", "woman window city night", "couple rooftop night"),
+    "seaside": ("couple beach sunset", "woman beach sunset dress", "couple walking beach"),
+    "sunset": ("couple sunset silhouette", "woman golden hour field", "couple sunset hug"),
+    "flowers": ("woman rose garden", "couple flower field", "woman holding roses"),
+    "night_sky": ("couple under stars", "woman moonlight window", "couple night sky"),
+    "lake": ("couple lake dock sunset", "woman lake sunrise", "couple lake romantic"),
+    "candlelight": ("couple candlelight dinner", "woman candles romantic", "couple wine candles"),
+    "picnic": ("couple autumn picnic", "woman picnic autumn forest", "couple picnic blanket"),
+    "forest": ("couple forest walk", "woman forest sunlight", "couple cabin woods"),
+    "seaside_relax": ("woman relaxing beach", "woman meditation sea", "woman yoga beach"),
+}
+SERIES_PEOPLE: dict[str, tuple[str, ...]] = {
+    "sleep": ("woman sleeping peacefully bed", "cozy bed night window", "woman sleeping blanket"),
+    "relax": ("woman relaxing spa", "woman meditating nature", "woman calm lake"),
+    "jazz": ("woman coffee cafe window", "couple jazz bar", "woman listening music cozy"),
+}
+
+
+def people_queries(theme_key: str | None, series_key: str | None = None) -> tuple[str, ...]:
+    """Kapak için insan içeren aramalar: önce temaya, sonra seriye göre."""
+    out = list(PEOPLE_QUERIES.get(theme_key or "", ()))
+    if series_key in SERIES_PEOPLE:
+        out = list(SERIES_PEOPLE[series_key][:2]) + out[:2]  # uyku/rahatlama/caz havası öne
+    return tuple(out or PEOPLE_QUERIES["fireplace"])
+
+
 def find_theme(text: str) -> Theme | None:
     """'autumn', 'sonbahar', 'deniz', 'kar', 'şömineli', 'yağmurlu', 'ormanda' gibi bir yazıdan temayı bul."""
     for v in _variants(text):

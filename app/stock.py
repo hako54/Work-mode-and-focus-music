@@ -124,6 +124,41 @@ def fetch(theme: Theme, dest: Path, used: set[str], rng: random.Random) -> list[
     return items
 
 
+def fetch_photos(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random,
+                 n: int = 3) -> list[StockItem]:
+    """Kapak adayları: her aramadan bir tane olacak şekilde n fotoğraf (yatay, daha önce kullanılmamış)."""
+    if not available():
+        return []
+    dest.mkdir(parents=True, exist_ok=True)
+    out: list[StockItem] = []
+    seen: set[str] = set()
+    try:
+        pools = []
+        for q in queries:
+            res = _get("/v1/search", {"query": q, "orientation": "landscape", "per_page": 15})
+            pools.append([p for p in res.get("photos", []) if f"p{p['id']}" not in used])
+        while len(out) < n and any(pools):
+            for pool in pools:
+                if len(out) >= n:
+                    break
+                while pool:
+                    p = pool.pop(rng.randrange(min(len(pool), 5)))  # en alakalı ilk sonuçlardan
+                    pid = f"p{p['id']}"
+                    url = p.get("src", {}).get("large2x") or p.get("src", {}).get("original")
+                    if pid in seen or not url:
+                        continue
+                    seen.add(pid)
+                    try:
+                        out.append(StockItem(pid, "photo", _download(url, dest / f"{pid}.jpg")))
+                    except requests.RequestException as e:
+                        log.warning("Kapak fotoğrafı indirilemedi (%s): %s", pid, e)
+                        continue
+                    break
+    except (requests.RequestException, ValueError, KeyError) as e:
+        log.warning("Pexels kapak araması başarısız: %s", e)
+    return out
+
+
 def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random) -> StockItem | None:
     """Tek sahneli video için temaya uygun TEK bir klip (yoksa tek bir fotoğraf) indir."""
     if not available():
