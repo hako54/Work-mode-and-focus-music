@@ -1154,6 +1154,8 @@ def validate_setting(key: str, value: str) -> str | None:
             return None if 1.0 <= float(value.replace(",", ".")) <= 2.0 else "1.0–2.0 arası olmalı"
         except ValueError:
             return "sayı olmalı (ör. 1.25)"
+    if key == "scene_loop":
+        return None if value in ("auto", "pingpong", "sequence", "loop") else "auto, pingpong, sequence ya da loop"
     if key == "daily_visual":
         ok = ("both", "scene", "collage", "fireplace", "image")
         return None if value in ok else "both, scene, collage, fireplace ya da image olmalı"

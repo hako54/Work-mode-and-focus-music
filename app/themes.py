@@ -205,6 +205,11 @@ def _variants(text: str) -> list[str]:
     return out
 
 
+# Geriye oynatılınca doğal görünen sahneler (bumerang döngüsü için). Yağmur, kar, düşen yapraklar, ateş ve
+# dalgalar geriye akınca fark edilir; onlarda aynı mekândan birkaç çekim art arda kullanılır.
+REVERSIBLE = frozenset({"lake", "night_sky", "city_night", "sunset", "candlelight", "flowers"})
+
+
 # Kapak fotoğrafı aramaları: temaya uygun, insan içeren (çift / kadın), sıcak ve romantik — müstehcen değil.
 PEOPLE_QUERIES: dict[str, tuple[str, ...]] = {
     "fireplace": ("couple by fireplace blanket", "woman reading by fireplace", "couple cozy fireplace night"),

@@ -16,3 +16,14 @@ def _fast_fireplace(monkeypatch):
     from app import fireplace
     monkeypatch.setattr(fireplace, "FIRE_LOOP_SECONDS", 1)
     monkeypatch.setattr(fireplace, "CRACKLE_SECONDS", 8)
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Testler asla Pexels'e çıkmasın (taklit edilmeyen aramalar hemen 'bulunamadı' döner)."""
+    import requests
+    from app import stock
+
+    def offline(*a, **k):
+        raise requests.RequestException("testlerde ağ kapalı")
+    monkeypatch.setattr(stock, "_get", offline)

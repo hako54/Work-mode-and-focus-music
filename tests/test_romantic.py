@@ -624,3 +624,58 @@ def test_people_thumbnail_candidates_and_choice(pipe, monkeypatch):
     db.set_setting("thumb_style", "scene")
     vid2 = pipe.create_daily(series_key="sleep")
     assert [int(p.stem.split("_")[1]) for p in pipe.thumb_options(vid2)] == [0]
+
+
+def _frame_rgb(path, t):
+    import subprocess
+    return subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", str(path), "-frames:v", "1",
+                           "-vf", "scale=32:18", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                          capture_output=True).stdout
+
+
+def test_pingpong_loop_plays_forward_then_backward(tmp_path):
+    import subprocess
+    from app import stock
+    src = tmp_path / "lake.mp4"   # renk zamanla değişen klip: ileri-geri kontrolü için
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i",
+                    "color=c=black:size=640x360:rate=30:duration=8,geq=r='X+T*25':g='Y':b='T*30'",
+                    "-pix_fmt", "yuv420p", str(src)], check=True, capture_output=True)
+    out = stock.pingpong_loop(src, tmp_path / "pp.mp4", (640, 360))
+    total = media.duration(out)
+    assert total == pytest.approx(16, abs=0.5)                     # ileri 8 + geri 8
+    dec = subprocess.run(["ffmpeg", "-v", "error", "-i", str(out), "-f", "null", "-"], capture_output=True, text=True)
+    assert dec.stderr.strip() == ""
+    a, b = _frame_rgb(out, 2.0), _frame_rgb(out, total - 2.0)      # simetrik anlar aynı kare olmalı
+    diff = sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+    assert diff < 12
+    c = _frame_rgb(out, 6.0)
+    assert sum(abs(x - y) for x, y in zip(a, c)) / len(a) > diff   # ama ileri giderken görüntü değişiyor
+
+
+def test_scene_mode_by_theme(pipe, monkeypatch):
+    import subprocess
+    from app import stock
+    db = pipe.db
+    monkeypatch.setattr(pipe, "SCENE_SHOT_SEC", 4.0)
+    monkeypatch.setattr(pipe, "SCENE_SHOT_XFADE", 1.0)
+
+    def clip(dest, name, color):
+        dest.mkdir(parents=True, exist_ok=True)
+        p = dest / f"{name}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:size=640x360:rate=30:duration=8",
+                        "-pix_fmt", "yuv420p", str(p)], check=True, capture_output=True)
+        return stock.StockItem(name, "video", p, 1.0)
+
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch_scene", lambda q, dest, used, rng: clip(dest, "v1", "blue"))
+    monkeypatch.setattr(stock, "fetch_scene_clips",
+                        lambda q, dest, used, rng, n=3: [clip(dest, f"s{i}", c) for i, c in enumerate(("red", "green"))])
+    monkeypatch.setattr(stock, "fetch_photos", lambda *a, **k: [])
+
+    lake = pipe.create_daily(series_key="romance", theme_key="lake")             # geriye doğal: bumerang
+    d = Path(db.video(lake)["video_path"]).parent
+    assert (d / "scene_loop.txt").read_text() == "pingpong"
+    rain = pipe.create_daily(series_key="romance", theme_key="rain")             # yağmur: çoklu çekim
+    d2 = Path(db.video(rain)["video_path"]).parent
+    assert (d2 / "scene_loop.txt").read_text() == "sequence"
+    assert {r["provider_id"] for r in db.query("SELECT provider_id FROM stock_used")} >= {"v1", "s0", "s1"}

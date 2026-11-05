@@ -187,13 +187,80 @@ def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: rando
     return None
 
 
-def _segment(item: StockItem, out: Path, size: tuple[int, int]) -> Path:
+def fetch_scene_clips(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random,
+                      n: int = 3) -> list[StockItem]:
+    """Aynı mekândan birkaç çekim (önce ilk arama: en benzer sahneler), en fazla n video."""
+    if not available():
+        return []
+    dest.mkdir(parents=True, exist_ok=True)
+    out: list[StockItem] = []
+    try:
+        for q in queries:
+            if len(out) >= n:
+                break
+            res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 15, "size": "medium"})
+            vids = [v for v in res.get("videos", []) if v.get("duration", 0) >= 12 and f"v{v['id']}" not in used
+                    and _calm(v) and f"v{v['id']}" not in {i.provider_id for i in out}]
+            for v in rng.sample(vids[:6], min(6, len(vids))):
+                if len(out) >= n:
+                    break
+                f = _best_file(v.get("video_files", []))
+                if f:
+                    pid = f"v{v['id']}"
+                    try:
+                        out.append(StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"),
+                                             slow_factor(f)))
+                    except requests.RequestException as e:
+                        log.warning("Sahne klibi indirilemedi (%s): %s", pid, e)
+    except (requests.RequestException, ValueError, KeyError) as e:
+        log.warning("Pexels sahne araması başarısız: %s", e)
+    return out
+
+
+_ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-g", str(media.FPS * 2), "-pix_fmt", "yuv420p"]
+
+
+def pingpong_loop(src: Path, out: Path, size: tuple[int, int], chunk: float = 3.0) -> Path:
+    """Bumerang döngüsü: ileri + geri; sonu başına doğal akar, hiç 'başa sarma' olmaz, süre iki katına çıkar.
+
+    Tüm klibi tek seferde ters çevirmek çok RAM ister; kısa parçalar ayrı ayrı ters çevrilip birleştirilir."""
     w, h = size
-    frames = int(SEGMENT_SEC * media.FPS)
+    work = out.parent / f"_pp_{out.stem}"
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        fwd = work / "fwd.mp4"
+        media.run(["ffmpeg", "-y", "-i", str(src), "-vf",
+                   f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={media.FPS},"
+                   "format=yuv420p,setsar=1", "-an", *_ENC, str(fwd)])
+        length = media.duration(fwd)
+        parts: list[Path] = []
+        start, n = 0.0, 0
+        while start < length - 0.05:
+            seg = work / f"rev_{n:03d}.mp4"
+            media.run(["ffmpeg", "-y", "-ss", f"{start:.3f}", "-t", f"{min(chunk, length - start):.3f}",
+                       "-i", str(fwd), "-vf", "reverse", "-an", *_ENC, str(seg)])
+            parts.append(seg)
+            start += chunk
+            n += 1
+        playlist = work / "list.txt"
+        playlist.write_text("".join(f"file '{p}'\n" for p in [fwd, *reversed(parts)]))
+        tmp = out.with_name(out.stem + ".part.mp4")
+        media.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(playlist), "-c", "copy",
+                   "-movflags", "+faststart", str(tmp)])
+        tmp.replace(out)
+        return out
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _segment(item: StockItem, out: Path, size: tuple[int, int], seg_sec: float | None = None) -> Path:
+    w, h = size
+    SEGMENT = seg_sec or SEGMENT_SEC
+    frames = int(SEGMENT * media.FPS)
     if item.kind == "video":
         dur = media.duration(item.path)
-        slow = max(1.0, min(item.slow, dur / (SEGMENT_SEC + 0.5)))  # kısa klipte süre yetmezse daha az yavaşlat
-        src_len = SEGMENT_SEC / slow
+        slow = max(1.0, min(item.slow, dur / (SEGMENT + 0.5)))  # kısa klipte süre yetmezse daha az yavaşlat
+        src_len = SEGMENT / slow
         start = max(0.0, (dur - src_len) / 2)
         vf = (f"setpts={slow:.4f}*PTS,scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
               f"fps={media.FPS},format=yuv420p,setsar=1")
@@ -204,7 +271,7 @@ def _segment(item: StockItem, out: Path, size: tuple[int, int]) -> Path:
         vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
               f"zoompan=z='1.0+0.04*on/{frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:"
               f"s={w}x{h}:fps={media.FPS},format=yuv420p,setsar=1")
-        media.run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(media.FPS), "-t", f"{SEGMENT_SEC:.2f}",
+        media.run(["ffmpeg", "-y", "-loop", "1", "-framerate", str(media.FPS), "-t", f"{SEGMENT:.2f}",
                    "-i", str(item.path), "-vf", vf, "-frames:v", str(frames), "-c:v", "libx264",
                    "-preset", "veryfast", "-crf", "20", str(out)])
     return out
@@ -221,12 +288,17 @@ def slow_down(item: StockItem, out: Path, max_out: float = 40.0) -> Path:
     return out
 
 
-def build_collage(items: list[StockItem], out: Path, size: tuple[int, int] = (1920, 1080)) -> Path:
-    """Klip ve fotoğrafları yumuşak geçişlerle birleştir; sonu başına bindirilerek atlamasız döner."""
+def build_collage(items: list[StockItem], out: Path, size: tuple[int, int] = (1920, 1080),
+                  seg_sec: float | None = None, xfade: float | None = None, min_items: int = 3) -> Path:
+    """Klip ve fotoğrafları yumuşak geçişlerle birleştir; sonu başına bindirilerek atlamasız döner.
+
+    seg_sec/xfade: her çekimin süresi ve geçiş (tek sahnenin çoklu çekimi için daha uzun)."""
     from .fireplace import seamless_video_loop
 
-    if len(items) < 3:
-        raise media.MediaError("Kolaj için en az 3 klip/fotoğraf gerekli")
+    seg_len = seg_sec or SEGMENT_SEC
+    xf = xfade or XFADE_SEC
+    if len(items) < min_items:
+        raise media.MediaError(f"En az {min_items} klip/fotoğraf gerekli")
     work = out.parent / f"_segs_{out.stem}"
     work.mkdir(parents=True, exist_ok=True)
     try:
@@ -240,22 +312,22 @@ def build_collage(items: list[StockItem], out: Path, size: tuple[int, int] = (19
             if photos and n % step == 0:
                 order.append(photos.pop(0))
         order += photos
-        segs = [_segment(it, work / f"s{n:02d}.mp4", size) for n, it in enumerate(order)]
+        segs = [_segment(it, work / f"s{n:02d}.mp4", size, seg_len) for n, it in enumerate(order)]
 
         cmd = ["ffmpeg", "-y"]
         for s in segs:
             cmd += ["-i", str(s)]
-        parts, prev, acc = [], "[0:v]", SEGMENT_SEC
+        parts, prev, acc = [], "[0:v]", seg_len
         for n in range(1, len(segs)):
             label = f"[x{n}]"
-            parts.append(f"{prev}[{n}:v]xfade=transition=fade:duration={XFADE_SEC}:offset={acc - XFADE_SEC:.3f}"
+            parts.append(f"{prev}[{n}:v]xfade=transition=fade:duration={xf}:offset={acc - xf:.3f}"
                          f"{label}")
-            prev, acc = label, acc + SEGMENT_SEC - XFADE_SEC
+            prev, acc = label, acc + seg_len - xf
         raw = work / "raw.mp4"
         cmd += ["-filter_complex", ";".join(parts), "-map", prev, "-an", "-c:v", "libx264", "-preset", "veryfast",
                 "-crf", "20", "-pix_fmt", "yuv420p", str(raw)]
         media.run(cmd)
-        return seamless_video_loop(raw, out, size, max_seconds=acc + 1, xfade=XFADE_SEC)
+        return seamless_video_loop(raw, out, size, max_seconds=acc + 1, xfade=xf)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

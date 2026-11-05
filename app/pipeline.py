@@ -16,7 +16,7 @@ from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
 from .styles import STYLE_BY_KEY, Style, active_styles, build_image_prompt, build_music_prompt, pick_style
-from .themes import EN_LABEL, SCENES, THEME_BY_KEY, Theme, people_queries, pick_theme
+from .themes import EN_LABEL, REVERSIBLE, SCENES, THEME_BY_KEY, Theme, people_queries, pick_theme
 
 log = logging.getLogger(__name__)
 MIX_XFADE = 6.0          # uzun mixte parçalar arası crossfade (sn)
@@ -300,21 +300,41 @@ class Pipeline:
         scene = self._make_track_image(self.db.video(video_id)["track_id"], style, rng)
         return theme.scene if theme else scene
 
+    SCENE_SHOT_SEC = 25.0   # çoklu çekimli sahnede her çekimin süresi (ağır çekimle)
+    SCENE_SHOT_XFADE = 4.0  # çekimler arası yumuşak geçiş
+
     def _build_scene(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
         """Tek, sinematik bir sahne (ör. şömineli oda) — atlamasız döngü; yoksa tek fotoğraf + yavaş yakınlaşma."""
         d = self._dir(f"video_{video_id}")
         used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}
-        item = stock.fetch_scene(SCENES[theme.key].queries, d / "stock", used, rng)
+        mode = self.db.get_setting("scene_loop") or "auto"
+        if mode == "auto":  # geriye akınca doğal görünen sahnelerde bumerang, diğerlerinde çoklu çekim
+            mode = "pingpong" if theme.key in REVERSIBLE else "sequence"
+        queries = SCENES[theme.key].queries
+        items = stock.fetch_scene_clips(queries, d / "stock", used, rng, n=3) if mode == "sequence" else []
+        if len(items) < 2:  # tek çekimle devam (bulunan tek klip ya da fotoğraf)
+            if mode == "sequence":
+                mode = "loop"
+            item = items[0] if items else stock.fetch_scene(queries, d / "stock", used, rng)
+            items = [item] if item else []
         try:
-            if not item:
+            if not items:
                 return False
+            item = items[0]
             shorts = self.db.get_setting("make_shorts") == "1"
-            if item.kind == "video":
-                src = stock.slow_down(item, d / "slow.mp4", max_out=40)  # sakin: ağır çekim
-                fireplace.seamless_video_loop(src, d / "collage.mp4", (1920, 1080), max_seconds=40, xfade=3.0)
-                if shorts:
-                    fireplace.seamless_video_loop(src, d / "collage_v.mp4", (1080, 1920), max_seconds=40,
-                                                  xfade=3.0)
+            sizes = [((1920, 1080), d / "collage.mp4")] + ([((1080, 1920), d / "collage_v.mp4")] if shorts else [])
+            if item.kind == "video" and mode == "sequence":
+                # aynı mekândan 2-3 çekim, her biri ~25 sn ağır çekim, 4 sn geçiş: döngü 1,5-2 dk sürer
+                for size, out in sizes:
+                    stock.build_collage(items, out, size, seg_sec=self.SCENE_SHOT_SEC, xfade=self.SCENE_SHOT_XFADE,
+                                        min_items=2)
+            elif item.kind == "video":
+                src = stock.slow_down(item, d / "slow.mp4", max_out=45)  # sakin: ağır çekim
+                for size, out in sizes:
+                    if mode == "pingpong":  # ileri + geri: başa sarma hissi yok, süre 2 katı
+                        stock.pingpong_loop(src, out, size)
+                    else:
+                        fireplace.seamless_video_loop(src, out, size, max_seconds=45, xfade=3.0)
                 src.unlink(missing_ok=True)
             else:
                 media.make_loop(item.path, d / "collage.mp4")
@@ -329,9 +349,11 @@ class Pipeline:
                 fireplace.still_frame(fireplace.Background("video", item.path), still)
             self.db.update_track(v["track_id"], image_path=str(still))
             (d / "visual.txt").write_text("scene")
+            (d / "scene_loop.txt").write_text(mode)
             with self.db.tx() as c:
-                c.execute("INSERT OR IGNORE INTO stock_used(provider_id, theme, used_at) VALUES (?, ?, ?)",
-                          (item.provider_id, theme.key, iso(utcnow())))
+                for it in items:
+                    c.execute("INSERT OR IGNORE INTO stock_used(provider_id, theme, used_at) VALUES (?, ?, ?)",
+                              (it.provider_id, theme.key, iso(utcnow())))
             return True
         finally:
             shutil.rmtree(d / "stock", ignore_errors=True)
