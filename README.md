@@ -77,6 +77,8 @@ Fotoğrafa kamera kaydırma uygulanmaz. Yapay zeka görseli yalnızca `/uret …
 
 **Tek sahne döngüsü (`scene_loop=auto`):** Her temada **çoklu çekim**: parça boyunca hiçbir çekim tekrar etmesin diye 4–12 farklı klip (~25'er sn, 4 sn geçişle) indirilir; çift/kadın sahneleri ile mekân çekimleri sırayla karışır. Bumerang (ileri-geri) yalnızca `/ayar scene_loop pingpong` ile.
 
+**Aynı kişiler:** İnsanlı sahnede tüm çift/kadın çekimleri aynı çekimciden ve aynı çekim gününden (Pexels'te birbirine yakın kimlikli) kliplerdir; aynı kişilerden ikinci çekim yoksa yalnızca tek insanlı çekim kullanılır, kalan çekimler insansız mekândır. Kapak da bu kişili kliplerin karelerinden yapılır (başka fotoğraf indirilmez).
+
 **Kapak:** Kendi şömine videon kullanıldıysa 4 kapak adayının hepsi o videodan orijinal karelerdir (varsayılan ilki); stok fotoğraf indirilmez.
 
 **Kapaklar:** Her videoya 4 aday hazırlanır: 0 = videodan sahne, 1–3 = temaya ve seriye uygun, insan içeren Pexels fotoğrafları (şömine başında çift, kafede kahveli kadın, huzurla uyuyan kadın…; romantik, müstehcen değil). Varsayılan 1. aday. Kartta **🖼 Kapak seç** ile değiştirilebilir; `/kapakornek [tema] [seri]` kredisiz örnek gösterir. `/ayar thumb_style scene` eski davranışa döner. En iyisini ölçmek için YouTube Studio'daki **Test & Compare** önerilir.

@@ -272,6 +272,8 @@ class Pipeline:
         d = self._dir(f"video_{video_id}")
         for f in ("collage.mp4", "collage_v.mp4", "background.txt", "visual.txt", "scene_loop.txt"):
             (d / f).unlink(missing_ok=True)
+        for f in d.glob("people_frame_*.png"):
+            f.unlink()
         theme = self._theme_of(video_id)
 
         def attempt(label: str, build) -> bool:
@@ -447,11 +449,17 @@ class Pipeline:
         elif mode == "pingpong" and people:
             mode = "sequence"
         queries = SCENES[theme.key].queries
-        if people:
+        people_items: list[stock.StockItem] = []
+        for f in d.glob("people_frame_*.png"):
+            f.unlink()
+        if people and mode == "sequence":  # insanlı çekimler hep aynı kişilerden; kalanı insansız mekân
             t = self.db.track(self.db.video(video_id)["track_id"])
-            queries = tuple(dict.fromkeys(people_queries(theme.key, t["series"]) + queries))
-        items = (stock.fetch_scene_clips(queries, d / "stock", used, rng, n=self._scene_shots(video_id))
-                 if mode == "sequence" else [])
+            items, people_items = stock.fetch_people_scene(people_queries(theme.key, t["series"]), queries,
+                                                           d / "stock", used, rng, n=self._scene_shots(video_id))
+        elif mode == "sequence":
+            items = stock.fetch_scene_clips(queries, d / "stock", used, rng, n=self._scene_shots(video_id))
+        else:
+            items = []
         if len(items) < 2:  # tek çekimle devam (bulunan tek klip ya da fotoğraf)
             if mode == "sequence":
                 mode = "loop"
@@ -478,6 +486,8 @@ class Pipeline:
                 src.unlink(missing_ok=True)
             self._finish_cinematic(video_id, theme)
             self._set_still(video_id, d / "collage.mp4", "video")
+            for n, it in enumerate(people_items[:3], 1):  # kapak: videodaki aynı kişilerden kareler
+                fireplace.still_frame(fireplace.Background("video", it.path), d / f"people_frame_{n}.png")
             (d / "visual.txt").write_text("people" if people else "scene")
             (d / "scene_loop.txt").write_text(mode)
             with self.db.tx() as c:
@@ -948,6 +958,16 @@ class Pipeline:
             self.db.update_video(video_id, thumb_path=str(thumb))
             return thumb
         cands = [visuals.make_thumbnail(scene_image, d / "thumb_0.jpg", headline, subline)]
+        frames = sorted(d.glob("people_frame_*.png"))
+        if frames:  # videodaki kişilerle aynı kişiler: başka fotoğraf indirilmez
+            for f in frames:
+                n = f.stem.rsplit("_", 1)[1]
+                cands.append(visuals.make_thumbnail(f, d / f"thumb_{n}.jpg", headline, subline))
+            chosen_file = d / "thumb_choice.txt"
+            choice = int(chosen_file.read_text()) if chosen_file.exists() else 1
+            thumb = cands[choice] if choice < len(cands) else cands[0]
+            self.db.update_video(video_id, thumb_path=str(thumb))
+            return thumb
         srcs = sorted(d.glob("thumb_src_*.jpg"))
         if not srcs and queries and stock.available() and self.db.get_setting("thumb_style") == "people":
             used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}

@@ -230,6 +230,75 @@ def fetch_scene_clips(queries: tuple[str, ...], dest: Path, used: set[str], rng:
     return out
 
 
+SAME_SHOOT_GAP = 3000   # aynı çekim gününden yüklenen kliplerin Pexels kimlikleri birbirine yakındır
+
+
+def _same_people_group(vids: list[dict], rng: random.Random, max_n: int) -> list[dict]:
+    """Aynı kişileri gösteren klipler: aynı çekimci + birbirine yakın yükleme kimliği (aynı çekim)."""
+    by_user: dict[object, list[dict]] = {}
+    for v in vids:
+        uid = (v.get("user") or {}).get("id")
+        if uid is not None:
+            by_user.setdefault(uid, []).append(v)
+    clusters: list[list[dict]] = []
+    for group in by_user.values():
+        group = sorted({v["id"]: v for v in group}.values(), key=lambda v: v["id"])
+        cur = [group[0]]
+        for v in group[1:]:
+            if v["id"] - cur[-1]["id"] <= SAME_SHOOT_GAP:
+                cur.append(v)
+            else:
+                clusters.append(cur)
+                cur = [v]
+        clusters.append(cur)
+    best = max((len(c) for c in clusters), default=0)
+    if best >= 2:
+        pick = rng.choice([c for c in clusters if len(c) == best])
+        return pick[:max_n]
+    return vids[:1]   # aynı kişiden ikinci çekim yoksa yalnızca tek insanlı çekim (farklı kişiler görünmesin)
+
+
+def fetch_people_scene(people_q: tuple[str, ...], place_q: tuple[str, ...], dest: Path, used: set[str],
+                       rng: random.Random, n: int = 8) -> tuple[list[StockItem], list[StockItem]]:
+    """İnsanlı tek sahne: tüm insanlı çekimler AYNI kişilerden (aynı çekimden), kalanı insansız mekân çekimi.
+
+    Döner: (sıralı tüm klipler, yalnızca insanlı klipler)."""
+    if not available():
+        return [], []
+    dest.mkdir(parents=True, exist_ok=True)
+    found: list[dict] = []
+    for q in people_q:
+        try:
+            res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 40, "size": "medium"})
+        except (requests.RequestException, ValueError) as e:
+            log.warning("Pexels insanlı arama başarısız (%s): %s", q, e)
+            continue
+        found += [v for v in res.get("videos", []) if v.get("duration", 0) >= 10 and f"v{v['id']}" not in used
+                  and _calm(v)]
+    people: list[StockItem] = []
+    for v in _same_people_group(found, rng, max_n=max(1, n // 2)):
+        f = _best_file(v.get("video_files", []))
+        if not f:
+            continue
+        pid = f"v{v['id']}"
+        try:
+            people.append(StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"), slow_factor(f)))
+        except requests.RequestException as e:
+            log.warning("İnsanlı klip indirilemedi (%s): %s", pid, e)
+    skip = used | {p.provider_id for p in people} | {f"v{v['id']}" for v in found}  # başka kişiler girmesin
+    places = fetch_scene_clips(place_q, dest, skip, rng, n=max(0, n - len(people)))
+    order: list[StockItem] = []
+    pi = iter(people)
+    for k, pl in enumerate(places):  # mekân, kişi, mekân, kişi…
+        order.append(pl)
+        if k % max(1, len(places) // max(1, len(people))) == 0:
+            nxt = next(pi, None)
+            if nxt:
+                order.append(nxt)
+    order += list(pi)
+    return order, people
+
+
 _ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-g", str(media.FPS * 2), "-pix_fmt", "yuv420p"]
 
 
