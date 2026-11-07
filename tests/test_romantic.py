@@ -30,6 +30,7 @@ def pipe(tmp_path, monkeypatch):
     db.set_setting("daily_max_sec", "60")
     db.set_setting("mix_min_min", "1")
     db.set_setting("mix_max_min", "1")
+    db.set_setting("cinematic", "0")        # sinematik işleme ayrı testlerde (test_fx.py)
     return Pipeline(db)
 
 
@@ -348,7 +349,7 @@ def test_single_scene_video_and_title_format(pipe, monkeypatch):
     db = pipe.db
     vid = pipe.create_daily("fireside_love_ballad", theme_key="autumn", visual="scene")
     v = db.video(vid)
-    assert (Path(v["video_path"]).parent / "visual.txt").read_text() == "scene"
+    assert (Path(v["video_path"]).parent / "visual.txt").read_text() == "people"   # önce insanlı sahne
     assert pipe._collage(vid) and pipe._collage(vid, "v")
     assert "Romantic Love Music by the Fire | Cozy Autumn Night Ambience" in v["title"]
     assert "Perfect for:" in v["description"] and "Footage: Pexels" in v["description"]
@@ -679,6 +680,9 @@ def test_scene_mode_by_theme(pipe, monkeypatch):
                         lambda q, dest, used, rng, n=3: [clip(dest, f"s{i}", c) for i, c in enumerate(("red", "green"))])
     monkeypatch.setattr(stock, "fetch_photos", lambda *a, **k: [])
 
+    lake = pipe.create_daily(series_key="romance", theme_key="lake")   # insanlı sahne: geriye oynatılmaz
+    assert (Path(db.video(lake)["video_path"]).parent / "scene_loop.txt").read_text() == "sequence"
+    db.set_setting("scene_people", "0")
     lake = pipe.create_daily(series_key="romance", theme_key="lake")             # geriye doğal: bumerang
     d = Path(db.video(lake)["video_path"]).parent
     assert (d / "scene_loop.txt").read_text() == "pingpong"

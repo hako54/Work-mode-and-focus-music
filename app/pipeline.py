@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from . import fireplace, harmony, media, metadata, profiles, stock, visuals
+from . import fireplace, fx, harmony, media, metadata, profiles, stock, visuals
 from . import series as series_mod
 from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
@@ -260,39 +260,58 @@ class Pipeline:
 
     def _daily_visuals(self, video_id: int, style: Style, rng: random.Random, progress: Progress = _noop,
                        visual: str | None = None) -> str:
-        """Kısa video görüntüsü: tek sahne / temalı klip kolajı → şömine → yapay zeka/prosedürel görsel.
+        """Kısa video görüntüsü.
 
-        daily_visual = both: sırayla bir tek sahne, bir kolaj."""
+        scene (varsayılan) sırası: kendi 4-5⭐ videon (şömine/sonbahar/kış/mum temalarında) → yapay zeka ile
+        özgün sahne (Stability anahtarı varsa her ai_scene_every'de bir) → insanlı stok sahne → şömine/görsel.
+        Hepsine sinematik işleme (sıcak ton, yavaş kayma, parçacık) uygulanır. daily_visual = both: sırayla
+        bir tek sahne, bir kolaj. visual: own | ai | people | scene | collage | fireplace (/uret ile)."""
         mode = visual or self.db.get_setting("daily_visual") or ("fireplace" if self.fireplace_on() else "image")
         if mode == "both":
             mode = "collage" if self.db.get_setting("last_daily_visual") == "scene" else "scene"
         d = self._dir(f"video_{video_id}")
-        for f in ("collage.mp4", "collage_v.mp4", "background.txt", "visual.txt"):
+        for f in ("collage.mp4", "collage_v.mp4", "background.txt", "visual.txt", "scene_loop.txt"):
             (d / f).unlink(missing_ok=True)
         theme = self._theme_of(video_id)
-        if mode == "scene" and theme and stock.available():
-            progress(f"🎬 {theme.emoji} Tek sahne hazırlanıyor: {SCENES[theme.key].text[:60]}…")
+
+        def attempt(label: str, build) -> bool:
+            progress(label)
             try:
-                if self._build_scene(video_id, theme, rng):
-                    self.db.set_setting("last_daily_visual", "scene")
-                    return SCENES[theme.key].text
+                if build():
+                    return True
             except Exception as e:  # noqa: BLE001
-                log.warning("Tek sahne hazırlanamadı, yedeğe geçiliyor: %s", str(e)[-600:])
-            for f in ("collage.mp4", "collage_v.mp4", "visual.txt"):
+                log.warning("%s hazırlanamadı, sıradakine geçiliyor: %s", label, str(e)[-600:])
+            for f in ("collage.mp4", "collage_v.mp4", "visual.txt", "background.txt"):  # yarım kalan dosyalar
                 (d / f).unlink(missing_ok=True)
-            # "both" modunda kolaja, "scene" modunda yine tek sahne olan şömine döngüsüne geç
+            return False
+
+        if theme and mode in ("scene", "own", "ai", "people"):
+            plan = self._scene_plan(theme, mode)
+            for kind in plan:
+                if kind == "own":
+                    ok = attempt(f"🎥 {theme.emoji} Kendi videon sinematik işleniyor",
+                                 lambda: self._build_own(video_id, theme, rng))
+                elif kind == "ai":
+                    ok = attempt(f"🎨 {theme.emoji} Yapay zeka ile özgün sahne çiziliyor: {SCENES[theme.key].text[:50]}…",
+                                 lambda: self._build_ai(video_id, theme, rng))
+                else:
+                    ok = stock.available() and attempt(
+                        f"🎬 {theme.emoji} Tek sahne hazırlanıyor: {SCENES[theme.key].text[:60]}…",
+                        lambda: self._build_scene(video_id, theme, rng, people=(kind == "people")))
+                if ok:
+                    self.db.set_setting("last_daily_visual", "scene")
+                    self.db.set_setting("last_scene_source", kind)
+                    if kind != "own":
+                        self.db.set_setting("scene_counter", str(int(self.db.get_setting("scene_counter") or 0) + 1))
+                    return SCENES[theme.key].text
+            # "both" modunda kolaja, diğerlerinde şömine döngüsüne geç
             mode = "collage" if (visual or self.db.get_setting("daily_visual")) == "both" else "fireplace"
         if mode == "collage" and theme and stock.available():
-            progress(f"🎞 {theme.emoji} {theme.label} temalı klipler hazırlanıyor")
-            try:
-                if self._build_collage(video_id, theme, rng):
-                    self.db.set_setting("last_daily_visual", "collage")
-                    return theme.scene
-            except Exception as e:  # noqa: BLE001
-                log.warning("Kolaj hazırlanamadı, yedeğe geçiliyor: %s", str(e)[-600:])
-            for f in ("collage.mp4", "collage_v.mp4"):  # yarım kalan kolaj render'ı bozmasın
-                (d / f).unlink(missing_ok=True)
-        if mode in ("collage", "scene", "fireplace") and self.fireplace_on():
+            if attempt(f"🎞 {theme.emoji} {theme.label} temalı klipler hazırlanıyor",
+                       lambda: self._build_collage(video_id, theme, rng)):
+                self.db.set_setting("last_daily_visual", "collage")
+                return theme.scene
+        if mode in ("collage", "scene", "fireplace", "own", "ai", "people") and self.fireplace_on():
             progress("🔥 Şömine arka planı seçiliyor")
             self._daily_fireplace(video_id, rng)
             return theme.scene if theme else self.FIRE_SCENE
@@ -300,17 +319,126 @@ class Pipeline:
         scene = self._make_track_image(self.db.video(video_id)["track_id"], style, rng)
         return theme.scene if theme else scene
 
+    def _own_videos(self) -> list[fireplace.Background]:
+        """Öncelikli kullanılacak kendi videoların: puanı own_video_min_rating ve üstü olanlar."""
+        try:
+            min_rating = int(self.db.get_setting("own_video_min_rating") or 4)
+        except ValueError:
+            min_rating = 4
+        ratings = self.bg_ratings()
+        return [b for b in fireplace.backgrounds() if b.kind == "video" and ratings.get(b.name, 3) >= min_rating]
+
+    def _scene_plan(self, theme: Theme, mode: str) -> list[str]:
+        """Denenecek görüntü kaynakları (sırayla)."""
+        people = "people" if self.db.get_setting("scene_people") != "0" else "stock"
+        if mode == "own":
+            return ["own", people]
+        if mode == "ai":
+            return ["ai", people]
+        if mode == "people":
+            return ["people", "stock"]
+        plan: list[str] = []
+        own_themes = {x.strip() for x in (self.db.get_setting("own_video_themes") or "").split(",") if x.strip()}
+        if theme.key in own_themes and self._own_videos():
+            plan.append("own")
+        every = self.db.get_int("ai_scene_every") if self.db.get_setting("ai_scene_every") else 0
+        if CONFIG.stability_api_key and every > 0 and (int(self.db.get_setting("scene_counter") or 0) + 1) % every == 0:
+            plan.append("ai")
+        plan.append(people)
+        if people == "people":
+            plan.append("stock")
+        if CONFIG.stability_api_key and "ai" not in plan:
+            plan.append("ai")  # stok bulunamazsa yine özgün sahne
+        return plan
+
+    def _cinematic_on(self) -> bool:
+        return self.db.get_setting("cinematic") != "0"
+
+    def _finish_cinematic(self, video_id: int, theme: Theme) -> None:
+        """Hazır döngülere (collage.mp4 / collage_v.mp4) sinematik işleme uygula."""
+        if not self._cinematic_on():
+            return
+        d = self._dir(f"video_{video_id}")
+        for name, size in (("collage.mp4", (1920, 1080)), ("collage_v.mp4", (1080, 1920))):
+            src = d / name
+            if src.exists():
+                tmp = d / f"fx_{name}"
+                fx.cinematic(src, tmp, size, theme_key=theme.key, seed=video_id)
+                tmp.replace(src)
+
+    def _set_still(self, video_id: int, src: Path, kind: str) -> None:
+        v = self.db.video(video_id)
+        still = self._dir(f"track_{v['track_id']}") / "image.png"
+        if kind == "photo":
+            fireplace.cover(src, (1920, 1080)).save(still)
+        else:
+            fireplace.still_frame(fireplace.Background("video", src), still)
+        self.db.update_track(v["track_id"], image_path=str(still))
+
+    def _build_own(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
+        """Kendi yüksek puanlı videon: ağırlıklı seçim, sinematik işleme; çıtırtı sesi de eklenir."""
+        pool = self._own_videos()
+        if not pool:
+            return False
+        last = self.db.get_setting("last_own_video")
+        pool = [b for b in pool if b.name != last] or pool          # art arda aynı video olmasın
+        ratings = self.bg_ratings()
+        bg = rng.choices(pool, weights=[fireplace.RATING_WEIGHT.get(ratings.get(b.name, 3), 1.0) for b in pool])[0]
+        d = self._dir(f"video_{video_id}")
+        shorts = self.db.get_setting("make_shorts") == "1"
+        self._sync_bg_slow()
+        sizes = [((1920, 1080), d / "collage.mp4")] + ([((1080, 1920), d / "collage_v.mp4")] if shorts else [])
+        for size, out in sizes:
+            loop = fireplace.loop_for(bg, size)
+            if self._cinematic_on():
+                fx.cinematic(loop, out, size, theme_key=theme.key, seed=video_id)
+            else:
+                shutil.copyfile(loop, out)
+        (d / "background.txt").write_text(bg.name)  # çıtırtı sesi için
+        (d / "visual.txt").write_text("own")
+        self._set_still(video_id, d / "collage.mp4", "video")
+        self.db.set_setting("last_own_video", bg.name)
+        return True
+
+    def _build_ai(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
+        """Yapay zeka ile özgün sahne (Stability) + yerel animasyon: yavaş kayma, parçacık, ışık titreşimi."""
+        if not CONFIG.stability_api_key:
+            return False
+        d = self._dir(f"video_{video_id}")
+        v = self.db.video(video_id)
+        t = self.db.track(v["track_id"])
+        people = self.db.get_setting("scene_people") != "0" and (t["series"] or "") != "sleep"
+        prompt = fx.ai_scene_prompt(SCENES[theme.key].text, people=people)
+        img = visuals.generate_image(prompt, d / "ai_scene.png", "16:9", seed=rng.randint(1, 2**31), fallback=False)
+        if not img:
+            return False
+        fx.cinematic(img, d / "collage.mp4", (1920, 1080), theme_key=theme.key, seed=video_id)
+        if self.db.get_setting("make_shorts") == "1":
+            vimg = visuals.vertical_from(img, d / "ai_vertical.png")
+            fx.cinematic(vimg, d / "collage_v.mp4", (1080, 1920), theme_key=theme.key, seed=video_id,
+                         zoom=1.08)
+        self._set_still(video_id, img, "photo")
+        (d / "visual.txt").write_text("ai")
+        return True
+
     SCENE_SHOT_SEC = 25.0   # çoklu çekimli sahnede her çekimin süresi (ağır çekimle)
     SCENE_SHOT_XFADE = 4.0  # çekimler arası yumuşak geçiş
 
-    def _build_scene(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
-        """Tek, sinematik bir sahne (ör. şömineli oda) — atlamasız döngü; yoksa tek fotoğraf + yavaş yakınlaşma."""
+    def _build_scene(self, video_id: int, theme: Theme, rng: random.Random, people: bool = False) -> bool:
+        """Tek, sinematik bir sahne (ör. şömineli oda) — atlamasız döngü; yoksa tek fotoğraf + yavaş yakınlaşma.
+
+        people: önce çift/kadın içeren klipler aranır (geriye akınca garip duracağından bumerang kullanılmaz)."""
         d = self._dir(f"video_{video_id}")
         used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}
         mode = self.db.get_setting("scene_loop") or "auto"
         if mode == "auto":  # geriye akınca doğal görünen sahnelerde bumerang, diğerlerinde çoklu çekim
-            mode = "pingpong" if theme.key in REVERSIBLE else "sequence"
+            mode = "pingpong" if theme.key in REVERSIBLE and not people else "sequence"
+        elif mode == "pingpong" and people:
+            mode = "sequence"
         queries = SCENES[theme.key].queries
+        if people:
+            t = self.db.track(self.db.video(video_id)["track_id"])
+            queries = tuple(dict.fromkeys(people_queries(theme.key, t["series"]) + queries))
         items = stock.fetch_scene_clips(queries, d / "stock", used, rng, n=3) if mode == "sequence" else []
         if len(items) < 2:  # tek çekimle devam (bulunan tek klip ya da fotoğraf)
             if mode == "sequence":
@@ -336,19 +464,21 @@ class Pipeline:
                     else:
                         fireplace.seamless_video_loop(src, out, size, max_seconds=45, xfade=3.0)
                 src.unlink(missing_ok=True)
+            elif self._cinematic_on():  # tek fotoğraf: sinematik kayma + parçacık doğrudan
+                fx.cinematic(item.path, d / "collage.mp4", (1920, 1080), theme_key=theme.key, seed=video_id)
+                if shorts:
+                    vimg = visuals.vertical_from(item.path, d / "vertical.png")
+                    fx.cinematic(vimg, d / "collage_v.mp4", (1080, 1920), theme_key=theme.key, seed=video_id,
+                                 zoom=1.08)
             else:
                 media.make_loop(item.path, d / "collage.mp4")
                 if shorts:
                     vimg = visuals.vertical_from(item.path, d / "vertical.png")
                     media.make_loop(vimg, d / "collage_v.mp4", size=(1080, 1920))
-            v = self.db.video(video_id)
-            still = self._dir(f"track_{v['track_id']}") / "image.png"
-            if item.kind == "photo":
-                fireplace.cover(item.path, (1920, 1080)).save(still)
-            else:
-                fireplace.still_frame(fireplace.Background("video", item.path), still)
-            self.db.update_track(v["track_id"], image_path=str(still))
-            (d / "visual.txt").write_text("scene")
+            if item.kind == "video":
+                self._finish_cinematic(video_id, theme)
+            self._set_still(video_id, item.path if item.kind == "photo" else d / "collage.mp4", item.kind)
+            (d / "visual.txt").write_text("people" if people else "scene")
             (d / "scene_loop.txt").write_text(mode)
             with self.db.tx() as c:
                 for it in items:

@@ -68,6 +68,14 @@ Uzun derlemeler de seri bazındadır (bir derlemede tek seri) ve seriler arasın
 
 **Temalar ve görüntü:** Her parça bir temayla üretilir (deniz kenarı, sonbahar, orman, yağmur, kış, gün batımı, çiçek bahçesi, yıldızlı gece, göl, mum ışığı). Müzik talimatı temanın havasını anlatır; kısa videonun görüntüsü o temadaki Pexels kliplerinden ve fotoğraflarından yumuşak geçişli, atlamasız dönen bir **kolajdır** (aynı klip iki kez kullanılmaz). Uzun derlemelerde **şömine döngüsü** + çıtırtı kullanılır. Pexels anahtarı yoksa kısa videolarda da şömineye geçilir. Ücretsiz anahtar: pexels.com/api → `PEXELS_API_KEY`. Yayın saati 08:00; onay 08:00'den sonra gelirse ertesi sabah 08:00'e zamanlanır.
 
+**Görüntü kaynağı sırası (`daily_visual=scene`):**
+1. **Kendi videoların** — `own_video_themes` temalarında (varsayılan şömine, sonbahar, kış, mum ışığı) `own_video_min_rating` (4) ve üstü puanlı videoların öncelikli; çıtırtı sesi de eklenir.
+2. **Yapay zeka ile özgün sahne** — `STABILITY_API_KEY` varsa her `ai_scene_every` (2) sahnede bir: temaya göre çizilen sinematik görsel, yerelde yavaş kamera kayması, parçacık ve ışık titreşimiyle canlandırılır (görsel başına birkaç kuruş, ElevenLabs kredisi harcamaz).
+3. **İnsanlı stok sahne** (`scene_people=1`) — Pexels'te önce çift/kadın içeren klipler (insanlı sahneler geriye oynatılmaz, çoklu çekim kullanılır); bulunamazsa mekân klipleri.
+4. Hiçbiri olmazsa şömine döngüsü.
+
+**Sinematik işleme (`cinematic=1`):** tüm sahnelere sıcak renk tonu, döngüyle tam örtüşen yavaş kamera kayması, vinyet, hafif film greni ve temaya göre parçacıklar (şömine/mum: kıvılcım, kış: kar, diğerleri: süzülen ışık tozu; yağmurda yok) eklenir; mum ve şöminede ışık hafifçe titrer. Tüm hareketler döngü süresine tam bölünür, video tekrar ederken atlamaz. `/uret … kendi|ai|insan` ile kaynak zorlanabilir.
+
 **Tek sahne döngüsü (`scene_loop=auto`):** Geriye oynatılınca doğal görünen sahnelerde (göl, gün batımı, yıldızlı gece, şehir ışıkları, mum ışığı, gül bahçesi) **bumerang**: ileri sonra yavaşça geri akar, hiç başa sarma hissi olmaz. Yağmur, kar, şömine, orman, piknik ve deniz gibi sahnelerde aynı mekândan **2–3 farklı çekim** ~25'er saniye, 4 sn geçişlerle birleşir; döngü 1,5–2 dakika sürer. `/ayar scene_loop pingpong|sequence|loop` ile zorlanabilir.
 
 **Kapaklar:** Her videoya 4 aday hazırlanır: 0 = videodan sahne, 1–3 = temaya ve seriye uygun, insan içeren Pexels fotoğrafları (şömine başında çift, kafede kahveli kadın, huzurla uyuyan kadın…; romantik, müstehcen değil). Varsayılan 1. aday. Kartta **🖼 Kapak seç** ile değiştirilebilir; `/kapakornek [tema] [seri]` kredisiz örnek gösterir. `/ayar thumb_style scene` eski davranışa döner. En iyisini ölçmek için YouTube Studio'daki **Test & Compare** önerilir.

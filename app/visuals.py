@@ -23,7 +23,9 @@ FONT_CANDIDATES = (
 )
 
 
-def generate_image(prompt: str, out: Path, aspect: str = "16:9", seed: int | None = None) -> Path:
+def generate_image(prompt: str, out: Path, aspect: str = "16:9", seed: int | None = None,
+                   fallback: bool = True) -> Path | None:
+    """fallback=False: Stability yoksa/hata verirse None döner (prosedürel görsele geçmez)."""
     out.parent.mkdir(parents=True, exist_ok=True)
     if CONFIG.stability_api_key:
         try:
@@ -44,6 +46,8 @@ def generate_image(prompt: str, out: Path, aspect: str = "16:9", seed: int | Non
             log.warning("Stability %s: %s — prosedürel görsele geçiliyor", resp.status_code, resp.text[:200])
         except requests.RequestException as e:
             log.warning("Stability hatası: %s — prosedürel görsele geçiliyor", e)
+    if not fallback:
+        return None
     w, h = (1920, 1080) if aspect == "16:9" else (1080, 1920)
     return procedural_image(out, (w, h), seed)
 

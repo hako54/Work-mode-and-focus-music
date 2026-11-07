@@ -43,8 +43,9 @@ HELP_PRODUCTION = {
 (şömine). Yayın 08:00. Her video onayınıza gelir.</i>
 
 <b>🎵 Üretim</b>
-/uret [seri] [tema] [sahne|kolaj] – yeni parça + Short (kredi harcar; takvimi kaydırmaz)
+/uret [seri] [tema] [sahne|kolaj|kendi|ai|insan] – yeni parça + Short (kredi harcar; takvimi kaydırmaz)
    ör. /uret jazz kafe sahne · /uret uyku yagmur · /uret sonbahar
+   kendi = 4-5⭐ kendi videon · ai = yapay zeka sahnesi · insan = çiftli/kadınlı stok sahne
 /derleme [seri] – en çok dinlenenlerden uzun video (kredisiz)
 /yogun [gün] – o kadar gün günde 2 video (önce hazır parçalar) · /yogun kapat
 /kapakornek [tema] [seri] – örnek kapaklar (çift/kadın fotoğraflı, kredisiz)
@@ -606,7 +607,9 @@ class Bot:
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         key, theme, visual, ser = None, None, None, None
         modes = {"sahne": "scene", "scene": "scene", "tek": "scene", "kolaj": "collage", "collage": "collage",
-                 "kendi": "fireplace"}
+                 "kendi": "own", "ai": "ai", "yz": "ai",
+                 "yapay": "ai", "insan": "people", "insanlı": "people", "insanli": "people", "cift": "people",
+                 "çift": "people"}
         ignored = []
         for a in ctx.args:  # /uret [seri] [stil] [tema] [sahne|kolaj] — sıra fark etmez
             if a.lower() in modes:
@@ -626,7 +629,8 @@ class Bot:
             return
         picked = " · ".join(x for x in (f"{ser.emoji} {ser.label}" if ser else "",
                                         f"{theme.emoji} {theme.label}" if theme else "",
-                                        {"scene": "tek sahne", "collage": "kolaj", "fireplace": "kendi şömine videon"}
+                                        {"scene": "tek sahne", "collage": "kolaj", "fireplace": "şömine videon",
+                                         "own": "kendi videon", "ai": "yapay zeka sahnesi", "people": "insanlı sahne"}
                                         .get(visual, "")) if x)
         await update.message.reply_text(
             "🎬 Yeni parça üretimi başladı" + (f" ({picked})" if picked else "") +
@@ -1159,6 +1163,12 @@ def validate_setting(key: str, value: str) -> str | None:
             return "sayı olmalı (ör. 1.25)"
     if key == "scene_loop":
         return None if value in ("auto", "pingpong", "sequence", "loop") else "auto, pingpong, sequence ya da loop"
+    if key == "own_video_themes":
+        from .themes import THEME_BY_KEY as _TB
+        bad = [x for x in value.replace(" ", "").split(",") if x and x not in _TB]
+        return f"bilinmeyen tema: {', '.join(bad)} (/temalar)" if bad else None
+    if key == "own_video_min_rating":
+        return None if value in ("1", "2", "3", "4", "5") else "1-5 arası olmalı"
     if key == "daily_visual":
         ok = ("both", "scene", "collage", "fireplace", "image")
         return None if value in ok else "both, scene, collage, fireplace ya da image olmalı"
@@ -1172,7 +1182,7 @@ def validate_setting(key: str, value: str) -> str | None:
     if not value.isdigit():
         return "pozitif tam sayı olmalı"
     n = int(value)
-    if key in ("make_shorts", "paused") and n not in (0, 1):
+    if key in ("make_shorts", "paused", "cinematic", "scene_people") and n not in (0, 1):
         return "0 veya 1 olmalı"
     if key in ("daily_min_sec", "daily_max_sec") and not 60 <= n <= 600:
         return "60–600 sn arası olmalı"
