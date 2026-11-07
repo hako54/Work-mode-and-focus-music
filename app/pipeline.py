@@ -319,12 +319,17 @@ class Pipeline:
         scene = self._make_track_image(self.db.video(video_id)["track_id"], style, rng)
         return theme.scene if theme else scene
 
-    def _own_videos(self) -> list[fireplace.Background]:
-        """Öncelikli kullanılacak kendi videoların: puanı own_video_min_rating ve üstü olanlar."""
+    def _own_min_rating(self, theme: Theme | None) -> int:
+        """Şömine temasında puanı düşürülmemiş (3+) tüm kendi videoların; diğer temalarda own_video_min_rating."""
         try:
             min_rating = int(self.db.get_setting("own_video_min_rating") or 4)
         except ValueError:
             min_rating = 4
+        return min(3, min_rating) if theme and theme.key == "fireplace" else min_rating
+
+    def _own_videos(self, theme: Theme | None = None) -> list[fireplace.Background]:
+        """Öncelikli kullanılacak kendi videoların (yalnızca video, fotoğraf değil)."""
+        min_rating = self._own_min_rating(theme)
         ratings = self.bg_ratings()
         return [b for b in fireplace.backgrounds() if b.kind == "video" and ratings.get(b.name, 3) >= min_rating]
 
@@ -339,7 +344,7 @@ class Pipeline:
             return ["people", "stock"]
         plan: list[str] = []
         own_themes = {x.strip() for x in (self.db.get_setting("own_video_themes") or "").split(",") if x.strip()}
-        if theme.key in own_themes and self._own_videos():
+        if (theme.key in own_themes or theme.key == "fireplace") and self._own_videos(theme):
             plan.append("own")
         every = self.db.get_int("ai_scene_every") if self.db.get_setting("ai_scene_every") else 0
         if CONFIG.stability_api_key and every > 0 and (int(self.db.get_setting("scene_counter") or 0) + 1) % every == 0:
@@ -347,8 +352,6 @@ class Pipeline:
         plan.append(people)
         if people == "people":
             plan.append("stock")
-        if CONFIG.stability_api_key and "ai" not in plan:
-            plan.append("ai")  # stok bulunamazsa yine özgün sahne
         return plan
 
     def _cinematic_on(self) -> bool:
@@ -377,7 +380,7 @@ class Pipeline:
 
     def _build_own(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
         """Kendi yüksek puanlı videon: ağırlıklı seçim, sinematik işleme; çıtırtı sesi de eklenir."""
-        pool = self._own_videos()
+        pool = self._own_videos(theme)
         if not pool:
             return False
         last = self.db.get_setting("last_own_video")
@@ -401,7 +404,7 @@ class Pipeline:
         return True
 
     def _build_ai(self, video_id: int, theme: Theme, rng: random.Random) -> bool:
-        """Yapay zeka ile özgün sahne (Stability) + yerel animasyon: yavaş kayma, parçacık, ışık titreşimi."""
+        """Yapay zeka ile özgün sahne (Stability; yalnızca /uret … ai ya da ai_scene_every ile). Kamera hareketi yok."""
         if not CONFIG.stability_api_key:
             return False
         d = self._dir(f"video_{video_id}")
@@ -415,8 +418,7 @@ class Pipeline:
         fx.cinematic(img, d / "collage.mp4", (1920, 1080), theme_key=theme.key, seed=video_id)
         if self.db.get_setting("make_shorts") == "1":
             vimg = visuals.vertical_from(img, d / "ai_vertical.png")
-            fx.cinematic(vimg, d / "collage_v.mp4", (1080, 1920), theme_key=theme.key, seed=video_id,
-                         zoom=1.08)
+            fx.cinematic(vimg, d / "collage_v.mp4", (1080, 1920), theme_key=theme.key, seed=video_id)
         self._set_still(video_id, img, "photo")
         (d / "visual.txt").write_text("ai")
         return True
@@ -446,7 +448,7 @@ class Pipeline:
             item = items[0] if items else stock.fetch_scene(queries, d / "stock", used, rng)
             items = [item] if item else []
         try:
-            if not items:
+            if not items or items[0].kind != "video":  # tek sahne her zaman gerçek video (fotoğraf değil)
                 return False
             item = items[0]
             shorts = self.db.get_setting("make_shorts") == "1"
@@ -456,7 +458,7 @@ class Pipeline:
                 for size, out in sizes:
                     stock.build_collage(items, out, size, seg_sec=self.SCENE_SHOT_SEC, xfade=self.SCENE_SHOT_XFADE,
                                         min_items=2)
-            elif item.kind == "video":
+            else:
                 src = stock.slow_down(item, d / "slow.mp4", max_out=45)  # sakin: ağır çekim
                 for size, out in sizes:
                     if mode == "pingpong":  # ileri + geri: başa sarma hissi yok, süre 2 katı
@@ -464,20 +466,8 @@ class Pipeline:
                     else:
                         fireplace.seamless_video_loop(src, out, size, max_seconds=45, xfade=3.0)
                 src.unlink(missing_ok=True)
-            elif self._cinematic_on():  # tek fotoğraf: sinematik kayma + parçacık doğrudan
-                fx.cinematic(item.path, d / "collage.mp4", (1920, 1080), theme_key=theme.key, seed=video_id)
-                if shorts:
-                    vimg = visuals.vertical_from(item.path, d / "vertical.png")
-                    fx.cinematic(vimg, d / "collage_v.mp4", (1080, 1920), theme_key=theme.key, seed=video_id,
-                                 zoom=1.08)
-            else:
-                media.make_loop(item.path, d / "collage.mp4")
-                if shorts:
-                    vimg = visuals.vertical_from(item.path, d / "vertical.png")
-                    media.make_loop(vimg, d / "collage_v.mp4", size=(1080, 1920))
-            if item.kind == "video":
-                self._finish_cinematic(video_id, theme)
-            self._set_still(video_id, item.path if item.kind == "photo" else d / "collage.mp4", item.kind)
+            self._finish_cinematic(video_id, theme)
+            self._set_still(video_id, d / "collage.mp4", "video")
             (d / "visual.txt").write_text("people" if people else "scene")
             (d / "scene_loop.txt").write_text(mode)
             with self.db.tx() as c:

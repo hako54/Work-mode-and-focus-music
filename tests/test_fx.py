@@ -75,18 +75,20 @@ def test_cinematic_from_image_and_video(tmp_path):
 def test_scene_plan_order(pipe, monkeypatch):
     import app.pipeline as pl
     fire, lake = THEME_BY_KEY["fireplace"], THEME_BY_KEY["lake"]
-    assert pipe._scene_plan(fire, "scene") == ["people", "stock"]          # kendi puanlı videon yok
-    monkeypatch.setattr(pipe, "_own_videos", lambda: [object()])
+    assert pipe._scene_plan(fire, "scene") == ["people", "stock"]          # kendi videon yok
+    monkeypatch.setattr(pipe, "_own_videos", lambda theme=None: [object()])
     assert pipe._scene_plan(fire, "scene")[0] == "own"
     assert pipe._scene_plan(lake, "scene")[0] == "people"                   # göl kendi-video teması değil
     monkeypatch.setattr(pl, "CONFIG", dataclasses.replace(pl.CONFIG, stability_api_key="x"))
-    pipe.db.set_setting("scene_counter", "1")                               # sıradaki (2.) sahne: yapay zeka
+    pipe.db.set_setting("scene_counter", "1")
+    assert pipe._scene_plan(lake, "scene") == ["people", "stock"]          # varsayılan: yapay zeka görseli yok
+    pipe.db.set_setting("ai_scene_every", "2")                              # istenirse her 2. sahne
     assert pipe._scene_plan(lake, "scene")[:2] == ["ai", "people"]
     pipe.db.set_setting("scene_counter", "2")
-    assert pipe._scene_plan(lake, "scene") == ["people", "stock", "ai"]
+    assert pipe._scene_plan(lake, "scene") == ["people", "stock"]
     pipe.db.set_setting("scene_people", "0")
     assert pipe._scene_plan(lake, "people") == ["people", "stock"]
-    assert pipe._scene_plan(lake, "scene") == ["stock", "ai"]
+    assert pipe._scene_plan(lake, "scene") == ["stock"]
 
 
 def test_own_rated_video_is_used_with_crackle(pipe, monkeypatch):
@@ -97,6 +99,8 @@ def test_own_rated_video_is_used_with_crackle(pipe, monkeypatch):
         calls = []
         monkeypatch.setattr(fx, "cinematic", lambda s, o, size, **k: calls.append(k["theme_key"]) or
                             Path(o).write_bytes(Path(s).read_bytes()) or o)
+        pipe.db.set_setting("cinematic", "1")
+        assert pipe._own_videos(THEME_BY_KEY["fireplace"]) and not pipe._own_videos(THEME_BY_KEY["autumn"])
         pipe.set_bg_rating(src.name, 5)
         vid = pipe.create_daily(series_key="romance", theme_key="fireplace")
         d = Path(pipe.db.video(vid)["video_path"]).parent
@@ -127,6 +131,20 @@ def test_ai_scene_with_stability(pipe, monkeypatch, tmp_path):
 def test_ai_without_key_falls_back(pipe):
     vid = pipe.create_daily(series_key="romance", theme_key="lake", visual="ai")   # anahtar/Pexels yok
     assert pipe._background(vid) is not None                                     # şömineye düşer
+
+
+def test_scene_never_uses_a_photo(pipe, monkeypatch, tmp_path):
+    from app import stock
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch_scene_clips", lambda *a, **k: [])
+    monkeypatch.setattr(stock, "fetch_scene", lambda *a, **k: stock.StockItem("p1", "photo", _image(tmp_path / "p.png")))
+    vid = pipe.create_daily(series_key="romance", theme_key="lake")
+    d = Path(pipe.db.video(vid)["video_path"]).parent
+    assert not (d / "visual.txt").exists() and pipe._background(vid) is not None   # fotoğraf yerine şömine videosu
+
+
+def test_no_camera_movement():
+    assert "sin(" not in fx._fit((1920, 1080))
 
 
 def test_new_settings_validate():

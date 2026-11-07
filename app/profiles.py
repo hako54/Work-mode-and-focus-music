@@ -46,11 +46,11 @@ SETTING_HELP: dict[str, str] = {
     "thumb_style": "Kapak: people (çift/kadın fotoğrafı, 3 aday) | scene (videodan kare)",
     "scene_loop": "Tek sahne döngüsü: auto (göl/gece gibi sahnelerde ileri-geri, yağmur/kar/şöminede aynı mekândan "
                   "2-3 çekim) | pingpong | sequence | loop",
-    "cinematic": "Sahnelere sinematik işleme: sıcak ton, yavaş kayma, vinyet, gren, parçacıklar (1/0)",
+    "cinematic": "Sahnelere sinematik işleme: sıcak ton, vinyet, gren, parçacıklar (1/0; kamera hareketi yok)",
     "own_video_themes": "Bu temalarda kendi 4-5⭐ videoların öncelikli (virgülle; boş = hiçbiri)",
     "own_video_min_rating": "Kendi videonun öncelikli kullanılması için en az puan (1-5)",
     "scene_people": "Stok sahnelerde önce çift/kadın içeren klipleri ara (1/0)",
-    "ai_scene_every": "Stability anahtarı varsa her kaçıncı sahne yapay zeka ile özgün olsun (0 = hiç)",
+    "ai_scene_every": "Stability anahtarı varsa her kaçıncı sahne yapay zeka görseli olsun (0 = hiç; görsel durağandır)",
     "daily_visual": "Kısa video görüntüsü: both (sırayla) | scene (tek sahne) | collage (klip kolajı) | fireplace | image",
     "compilation_fill": "Derleme kısa kalırsa: repeat = parçaları tekrarla (kredisiz), generate = yeni parça üret",
     "mix_every_days": "Kaç günde bir uzun mix üretilsin",
@@ -182,11 +182,11 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
         "thumb_style": "people",      # kapak: people (temaya uygun çift/kadın fotoğrafı) | scene (videodan kare)
         "scene_loop": "auto",         # tek sahne döngüsü: auto | pingpong (ileri-geri) | sequence (çoklu çekim) | loop
-        "cinematic": "1",             # sahnelere sıcak ton + yavaş kayma + parçacık (kıvılcım/kar/toz)
+        "cinematic": "0",             # 1: sahnelere sıcak ton + parçacık (kıvılcım/kar/toz); kamera hareketi yok
         "own_video_themes": "fireplace,autumn,winter,candlelight",
-        "own_video_min_rating": "4",  # bu temalarda 4-5⭐ kendi videoların önce
+        "own_video_min_rating": "4",  # sonbahar/kış/mum temalarında 4-5⭐ kendi videoların önce (şömine: hepsi)
         "scene_people": "1",          # stok sahnede önce çift/kadın içeren klipler
-        "ai_scene_every": "2",        # Stability anahtarı varsa her 2. sahne yapay zeka görseli + animasyon
+        "ai_scene_every": "0",        # 0: yapay zeka görseli otomatik kullanılmaz (kısa videolar hep gerçek video)
         "daily_visual": "scene",      # kısa videolar: scene (tek sıcak mekân, döngü) | both | collage | fireplace | image
         "daily_min_sec": "270",
         "daily_max_sec": "330",

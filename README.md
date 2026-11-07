@@ -68,13 +68,12 @@ Uzun derlemeler de seri bazındadır (bir derlemede tek seri) ve seriler arasın
 
 **Temalar ve görüntü:** Her parça bir temayla üretilir (deniz kenarı, sonbahar, orman, yağmur, kış, gün batımı, çiçek bahçesi, yıldızlı gece, göl, mum ışığı). Müzik talimatı temanın havasını anlatır; kısa videonun görüntüsü o temadaki Pexels kliplerinden ve fotoğraflarından yumuşak geçişli, atlamasız dönen bir **kolajdır** (aynı klip iki kez kullanılmaz). Uzun derlemelerde **şömine döngüsü** + çıtırtı kullanılır. Pexels anahtarı yoksa kısa videolarda da şömineye geçilir. Ücretsiz anahtar: pexels.com/api → `PEXELS_API_KEY`. Yayın saati 08:00; onay 08:00'den sonra gelirse ertesi sabah 08:00'e zamanlanır.
 
-**Görüntü kaynağı sırası (`daily_visual=scene`):**
-1. **Kendi videoların** — `own_video_themes` temalarında (varsayılan şömine, sonbahar, kış, mum ışığı) `own_video_min_rating` (4) ve üstü puanlı videoların öncelikli; çıtırtı sesi de eklenir.
-2. **Yapay zeka ile özgün sahne** — `STABILITY_API_KEY` varsa her `ai_scene_every` (2) sahnede bir: temaya göre çizilen sinematik görsel, yerelde yavaş kamera kayması, parçacık ve ışık titreşimiyle canlandırılır (görsel başına birkaç kuruş, ElevenLabs kredisi harcamaz).
-3. **İnsanlı stok sahne** (`scene_people=1`) — Pexels'te önce çift/kadın içeren klipler (insanlı sahneler geriye oynatılmaz, çoklu çekim kullanılır); bulunamazsa mekân klipleri.
-4. Hiçbiri olmazsa şömine döngüsü.
+**Görüntü kaynağı sırası (`daily_visual=scene`) — kısa videolar her zaman gerçek video, fotoğraf değil:**
+1. **Kendi videoların** — şömine temasında puanı düşürülmemiş (3⭐+) tüm şömine videoların, `own_video_themes` içindeki diğer temalarda (sonbahar, kış, mum ışığı) yalnızca `own_video_min_rating` (4) ve üstü puanlılar; çıtırtı sesi de eklenir.
+2. **İnsanlı stok video** (`scene_people=1`) — Pexels'te önce çift/kadın içeren klipler (geriye oynatılmaz, çoklu çekim); bulunamazsa mekân klipleri. Pexels fotoğrafı kullanılmaz.
+3. Hiçbiri olmazsa şömine videosu.
 
-**Sinematik işleme (`cinematic=1`):** tüm sahnelere sıcak renk tonu, döngüyle tam örtüşen yavaş kamera kayması, vinyet, hafif film greni ve temaya göre parçacıklar (şömine/mum: kıvılcım, kış: kar, diğerleri: süzülen ışık tozu; yağmurda yok) eklenir; mum ve şöminede ışık hafifçe titrer. Tüm hareketler döngü süresine tam bölünür, video tekrar ederken atlamaz. `/uret … kendi|ai|insan` ile kaynak zorlanabilir.
+Fotoğrafa kamera kaydırma uygulanmaz. Yapay zeka görseli yalnızca `/uret … ai` ile ya da `/ayar ai_scene_every 2` ile istenirse kullanılır (`STABILITY_API_KEY` gerekir; görsel durağandır). `/ayar cinematic 1` gerçek videolara sıcak ton, vinyet ve temaya göre parçacık (kıvılcım/kar/ışık tozu) ekler; varsayılan kapalı, kamera hareketi yok.
 
 **Tek sahne döngüsü (`scene_loop=auto`):** Geriye oynatılınca doğal görünen sahnelerde (göl, gün batımı, yıldızlı gece, şehir ışıkları, mum ışığı, gül bahçesi) **bumerang**: ileri sonra yavaşça geri akar, hiç başa sarma hissi olmaz. Yağmur, kar, şömine, orman, piknik ve deniz gibi sahnelerde aynı mekândan **2–3 farklı çekim** ~25'er saniye, 4 sn geçişlerle birleşir; döngü 1,5–2 dakika sürer. `/ayar scene_loop pingpong|sequence|loop` ile zorlanabilir.
 

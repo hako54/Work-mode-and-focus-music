@@ -159,8 +159,9 @@ def fetch_photos(queries: tuple[str, ...], dest: Path, used: set[str], rng: rand
     return out
 
 
-def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random) -> StockItem | None:
-    """Tek sahneli video için temaya uygun TEK bir klip (yoksa tek bir fotoğraf) indir."""
+def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random,
+                allow_photo: bool = False) -> StockItem | None:
+    """Tek sahneli video için temaya uygun TEK bir klip indir (allow_photo: yoksa tek fotoğraf)."""
     if not available():
         return None
     dest.mkdir(parents=True, exist_ok=True)
@@ -174,7 +175,7 @@ def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: rando
                 if f:
                     pid = f"v{v['id']}"
                     return StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"), slow_factor(f))
-        for q in queries:
+        for q in (queries if allow_photo else ()):
             res = _get("/v1/search", {"query": q, "orientation": "landscape", "per_page": 15})
             photos = [p for p in res.get("photos", []) if f"p{p['id']}" not in used]
             if photos:

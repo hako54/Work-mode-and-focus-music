@@ -45,7 +45,7 @@ HELP_PRODUCTION = {
 <b>🎵 Üretim</b>
 /uret [seri] [tema] [sahne|kolaj|kendi|ai|insan] – yeni parça + Short (kredi harcar; takvimi kaydırmaz)
    ör. /uret jazz kafe sahne · /uret uyku yagmur · /uret sonbahar
-   kendi = 4-5⭐ kendi videon · ai = yapay zeka sahnesi · insan = çiftli/kadınlı stok sahne
+   kendi = kendi şömine videon · insan = çiftli/kadınlı stok video · ai = yapay zeka görseli (durağan)
 /derleme [seri] – en çok dinlenenlerden uzun video (kredisiz)
 /yogun [gün] – o kadar gün günde 2 video (önce hazır parçalar) · /yogun kapat
 /kapakornek [tema] [seri] – örnek kapaklar (çift/kadın fotoğraflı, kredisiz)

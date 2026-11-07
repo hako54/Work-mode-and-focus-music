@@ -1,4 +1,4 @@
-"""Sinematik işleme: sıcak renk tonu, yavaş ve atlamasız kamera kayması, vinyet, film greni,
+"""Sinematik işleme (isteğe bağlı): sıcak renk tonu, vinyet, film greni,
 temaya göre süzülen parçacıklar (şöminede kıvılcım, kışta kar, diğerlerinde ışık tozu) ve
 mum/şömine sahnelerinde hafif ışık titreşimi.
 
@@ -101,13 +101,10 @@ class _Particles:
         return (np.clip(img, 0, 1) * 255).astype(np.uint8)
 
 
-def _drift(size: tuple[int, int], length: float, zoom: float) -> str:
-    """Yukarı ölçekle + zamanla kayan kırpma: döngü süresinde tam bir tur (atlamasız)."""
+def _fit(size: tuple[int, int]) -> str:
+    """Sabit kadraj: kamera hareketi yok (yalnızca boyuta oturt)."""
     w, h = size
-    sw, sh = int(w * zoom) // 2 * 2, int(h * zoom) // 2 * 2
-    return (f"scale={sw}:{sh}:force_original_aspect_ratio=increase,crop={sw}:{sh},"
-            f"crop={w}:{h}:x='(iw-{w})/2*(1+0.9*sin(2*PI*t/{length:.3f}))':"
-            f"y='(ih-{h})/2*(1+0.8*sin(4*PI*t/{length:.3f}+1.2))'")
+    return f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
 
 
 GRADE = ("colorbalance=rs=0.035:gs=0.008:bs=-0.04:rm=0.03:gm=0.005:bm=-0.03:rh=0.02:bh=-0.02,"
@@ -115,18 +112,17 @@ GRADE = ("colorbalance=rs=0.035:gs=0.008:bs=-0.04:rm=0.03:gm=0.005:bm=-0.03:rh=0
 
 
 def cinematic(src: Path, out: Path, size: tuple[int, int] = (1920, 1080), theme_key: str | None = None,
-              length: float | None = None, zoom: float | None = None, seed: int = 7) -> Path:
+              length: float | None = None, seed: int = 7) -> Path:
     """Video ya da görselden sinematik, dikişsiz döngü klibi üret (sessiz)."""
     w, h = size
     is_image = src.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
     L = length or (IMAGE_LOOP_SEC if is_image else media.duration(src))
     L = round(L * media.FPS) / media.FPS
-    zoom = zoom or (1.14 if is_image else 1.06)
     kind = particles_for(theme_key)
     flicker = (theme_key in FLICKER_THEMES)
     inp = (["-loop", "1", "-framerate", str(media.FPS), "-t", f"{L:.3f}", "-i", str(src)] if is_image
            else ["-i", str(src)])
-    chain = (f"[0:v]fps={media.FPS},trim=0:{L:.3f},setpts=PTS-STARTPTS,{_drift(size, L, zoom)},{GRADE}"
+    chain = (f"[0:v]fps={media.FPS},trim=0:{L:.3f},setpts=PTS-STARTPTS,{_fit(size)},{GRADE}"
              + (f",eq=brightness='0.012*sin(2*PI*7*t/{L:.3f})+0.008*sin(2*PI*17*t/{L:.3f})':eval=frame"
                 if flicker else "")
              + ",format=gbrp[base]")
