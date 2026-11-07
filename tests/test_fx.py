@@ -108,6 +108,11 @@ def test_own_rated_video_is_used_with_crackle(pipe, monkeypatch):
         assert pipe._background(vid).name == src.name          # çıtırtı sesi eklenir
         assert pipe._collage(vid) and calls and set(calls) == {"fireplace"}
         assert pipe.db.get_setting("last_own_video") == src.name
+        # kapak: kendi videondan orijinal kareler, stok/yapay zeka fotoğrafı yok
+        opts = pipe.thumb_options(vid)
+        assert len(opts) == 4 and not list(d.glob("thumb_src_*"))
+        assert Path(pipe.db.video(vid)["thumb_path"]).name == "thumb_0.jpg"
+        assert pipe._own_background(vid).name == src.name
     finally:
         src.unlink(missing_ok=True)
 

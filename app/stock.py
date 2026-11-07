@@ -190,31 +190,43 @@ def fetch_scene(queries: tuple[str, ...], dest: Path, used: set[str], rng: rando
 
 def fetch_scene_clips(queries: tuple[str, ...], dest: Path, used: set[str], rng: random.Random,
                       n: int = 3) -> list[StockItem]:
-    """Aynı mekândan birkaç çekim (önce ilk arama: en benzer sahneler), en fazla n video."""
+    """Aynı temadan farklı çekimler, en fazla n video. Her aramadan en fazla birkaç klip alınır ki
+    sahneler çeşitlensin; aramalar biterse ikinci turda kalanlardan tamamlanır."""
     if not available():
         return []
     dest.mkdir(parents=True, exist_ok=True)
     out: list[StockItem] = []
-    try:
-        for q in queries:
-            if len(out) >= n:
-                break
-            res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 15, "size": "medium"})
-            vids = [v for v in res.get("videos", []) if v.get("duration", 0) >= 12 and f"v{v['id']}" not in used
-                    and _calm(v) and f"v{v['id']}" not in {i.provider_id for i in out}]
-            for v in rng.sample(vids[:6], min(6, len(vids))):
-                if len(out) >= n:
-                    break
-                f = _best_file(v.get("video_files", []))
-                if f:
-                    pid = f"v{v['id']}"
-                    try:
-                        out.append(StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"),
-                                             slow_factor(f)))
-                    except requests.RequestException as e:
-                        log.warning("Sahne klibi indirilemedi (%s): %s", pid, e)
-    except (requests.RequestException, ValueError, KeyError) as e:
-        log.warning("Pexels sahne araması başarısız: %s", e)
+    per_query = max(2, -(-n // max(1, len(queries))))
+    pools: list[list[dict]] = []
+    leftovers: list[dict] = []
+    for q in queries:
+        try:
+            res = _get("/videos/search", {"query": q, "orientation": "landscape", "per_page": 20, "size": "medium"})
+        except (requests.RequestException, ValueError) as e:
+            log.warning("Pexels sahne araması başarısız (%s): %s", q, e)
+            continue
+        vids = [v for v in res.get("videos", []) if v.get("duration", 0) >= 12 and f"v{v['id']}" not in used
+                and _calm(v)]
+        vids = rng.sample(vids[:12], min(12, len(vids)))
+        pools.append(vids[:per_query])
+        leftovers += vids[per_query:]
+    # aramalar arasında sırayla (çift sahnesi, mekân, çift, mekân…), sonra kalanlar
+    order = [pool[i] for i in range(per_query) for pool in pools if i < len(pool)] + leftovers
+    seen: set[int] = set()
+    for v in order:
+        if len(out) >= n:
+            break
+        if v.get("id") in seen:
+            continue
+        seen.add(v.get("id"))
+        f = _best_file(v.get("video_files", []))
+        if not f:
+            continue
+        pid = f"v{v['id']}"
+        try:
+            out.append(StockItem(pid, "video", _download(f["link"], dest / f"{pid}.mp4"), slow_factor(f)))
+        except requests.RequestException as e:
+            log.warning("Sahne klibi indirilemedi (%s): %s", pid, e)
     return out
 
 

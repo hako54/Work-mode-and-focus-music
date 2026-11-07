@@ -676,20 +676,44 @@ def test_scene_mode_by_theme(pipe, monkeypatch):
 
     monkeypatch.setattr(stock, "available", lambda: True)
     monkeypatch.setattr(stock, "fetch_scene", lambda q, dest, used, rng: clip(dest, "v1", "blue"))
-    monkeypatch.setattr(stock, "fetch_scene_clips",
-                        lambda q, dest, used, rng, n=3: [clip(dest, f"s{i}", c) for i, c in enumerate(("red", "green"))])
+    asked = []
+
+    def clips(q, dest, used, rng, n=3):
+        asked.append(n)
+        return [clip(dest, f"s{i}", c) for i, c in enumerate(("red", "green"))]
+    monkeypatch.setattr(stock, "fetch_scene_clips", clips)
     monkeypatch.setattr(stock, "fetch_photos", lambda *a, **k: [])
 
-    lake = pipe.create_daily(series_key="romance", theme_key="lake")   # insanlı sahne: geriye oynatılmaz
+    lake = pipe.create_daily(series_key="romance", theme_key="lake")   # her temada çoklu çekim
     assert (Path(db.video(lake)["video_path"]).parent / "scene_loop.txt").read_text() == "sequence"
+    assert asked[-1] >= pipe.SCENE_MIN_SHOTS           # aynı iki görüntü dönmesin: en az 4 farklı çekim istenir
+    db.set_setting("scene_loop", "pingpong")           # bumerang yalnızca istenirse
     db.set_setting("scene_people", "0")
-    lake = pipe.create_daily(series_key="romance", theme_key="lake")             # geriye doğal: bumerang
+    lake = pipe.create_daily(series_key="romance", theme_key="lake")
     d = Path(db.video(lake)["video_path"]).parent
     assert (d / "scene_loop.txt").read_text() == "pingpong"
-    rain = pipe.create_daily(series_key="romance", theme_key="rain")             # yağmur: çoklu çekim
-    d2 = Path(db.video(rain)["video_path"]).parent
-    assert (d2 / "scene_loop.txt").read_text() == "sequence"
     assert {r["provider_id"] for r in db.query("SELECT provider_id FROM stock_used")} >= {"v1", "s0", "s1"}
+
+
+def test_scene_clips_mix_queries(monkeypatch, tmp_path):
+    import random as _r
+    from app import stock
+
+    def fake_get(path, params):
+        base = {"couple": 100, "room": 200}[params["query"]]
+        return {"videos": [{"id": base + i, "duration": 30, "video_files": [{"link": f"u{base + i}"}]}
+                           for i in range(10)]}
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "_get", fake_get)
+    monkeypatch.setattr(stock, "_calm", lambda v: True)
+    monkeypatch.setattr(stock, "_best_file", lambda files: files[0])
+    monkeypatch.setattr(stock, "slow_factor", lambda f: 1.0)
+    monkeypatch.setattr(stock, "_download", lambda url, out: out)
+    got = stock.fetch_scene_clips(("couple", "room"), tmp_path, set(), _r.Random(1), n=6)
+    ids = [int(i.provider_id[1:]) for i in got]
+    assert len(ids) == 6 == len(set(ids))
+    assert sum(i < 200 for i in ids) == 3                   # iki aramadan eşit, sırayla
+    assert (ids[0] < 200) != (ids[1] < 200)
 
 
 def test_long_videos_wait_for_enough_distinct_tracks(pipe):

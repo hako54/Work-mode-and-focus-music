@@ -134,15 +134,15 @@ def cover(image: Path, size: tuple[int, int]) -> Image.Image:
     return img.crop((left, top, left + w, top + h))
 
 
-def still_frame(bg: Background, out: Path, size: tuple[int, int] = (1920, 1080)) -> Path:
-    """Küçük resim ve dikey kesit için tek kare."""
+def still_frame(bg: Background, out: Path, size: tuple[int, int] = (1920, 1080), at: float = 0.4) -> Path:
+    """Küçük resim ve dikey kesit için tek kare (at: videonun hangi oranındaki kare)."""
     out.parent.mkdir(parents=True, exist_ok=True)
     if bg.kind == "image":
         cover(bg.path, size).save(out)
         return out
     dur = media.duration(bg.path)
     tmp = out.with_suffix(".frame.png")
-    media.run(["ffmpeg", "-y", "-ss", f"{dur * 0.4:.2f}", "-i", str(bg.path), "-frames:v", "1", str(tmp)])
+    media.run(["ffmpeg", "-y", "-ss", f"{dur * at:.2f}", "-i", str(bg.path), "-frames:v", "1", str(tmp)])
     cover(tmp, size).save(out)
     tmp.unlink(missing_ok=True)
     return out

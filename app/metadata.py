@@ -182,6 +182,6 @@ def full_description(body: str, tracklist: str = "", extra_links: str = "", hash
         parts.append(extra_links)
     if profiles.subscribe_url():
         parts.append(f"🔔 Subscribe to {profiles.channel_name()}: {profiles.subscribe_url()}")
-    parts.append("Music and visuals are created with AI tools and curated by the channel.")
+    parts.append("Music is composed with AI tools and curated by the channel.")
     parts.append(hashtags or profiles.current().hashtags)
     return "\n\n".join(parts)[:4900]

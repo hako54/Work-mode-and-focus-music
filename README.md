@@ -75,7 +75,9 @@ Uzun derlemeler de seri bazındadır (bir derlemede tek seri) ve seriler arasın
 
 Fotoğrafa kamera kaydırma uygulanmaz. Yapay zeka görseli yalnızca `/uret … ai` ile ya da `/ayar ai_scene_every 2` ile istenirse kullanılır (`STABILITY_API_KEY` gerekir; görsel durağandır). `/ayar cinematic 1` gerçek videolara sıcak ton, vinyet ve temaya göre parçacık (kıvılcım/kar/ışık tozu) ekler; varsayılan kapalı, kamera hareketi yok.
 
-**Tek sahne döngüsü (`scene_loop=auto`):** Geriye oynatılınca doğal görünen sahnelerde (göl, gün batımı, yıldızlı gece, şehir ışıkları, mum ışığı, gül bahçesi) **bumerang**: ileri sonra yavaşça geri akar, hiç başa sarma hissi olmaz. Yağmur, kar, şömine, orman, piknik ve deniz gibi sahnelerde aynı mekândan **2–3 farklı çekim** ~25'er saniye, 4 sn geçişlerle birleşir; döngü 1,5–2 dakika sürer. `/ayar scene_loop pingpong|sequence|loop` ile zorlanabilir.
+**Tek sahne döngüsü (`scene_loop=auto`):** Her temada **çoklu çekim**: parça boyunca hiçbir çekim tekrar etmesin diye 4–12 farklı klip (~25'er sn, 4 sn geçişle) indirilir; çift/kadın sahneleri ile mekân çekimleri sırayla karışır. Bumerang (ileri-geri) yalnızca `/ayar scene_loop pingpong` ile.
+
+**Kapak:** Kendi şömine videon kullanıldıysa 4 kapak adayının hepsi o videodan orijinal karelerdir (varsayılan ilki); stok fotoğraf indirilmez.
 
 **Kapaklar:** Her videoya 4 aday hazırlanır: 0 = videodan sahne, 1–3 = temaya ve seriye uygun, insan içeren Pexels fotoğrafları (şömine başında çift, kafede kahveli kadın, huzurla uyuyan kadın…; romantik, müstehcen değil). Varsayılan 1. aday. Kartta **🖼 Kapak seç** ile değiştirilebilir; `/kapakornek [tema] [seri]` kredisiz örnek gösterir. `/ayar thumb_style scene` eski davranışa döner. En iyisini ölçmek için YouTube Studio'daki **Test & Compare** önerilir.
 

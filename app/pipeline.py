@@ -16,7 +16,7 @@ from .config import CONFIG
 from .db import Database, iso, parse_iso, tags_of, utcnow
 from .music import get_provider
 from .styles import STYLE_BY_KEY, Style, active_styles, build_image_prompt, build_music_prompt, pick_style
-from .themes import EN_LABEL, REVERSIBLE, SCENES, THEME_BY_KEY, Theme, people_queries, pick_theme
+from .themes import EN_LABEL, SCENES, THEME_BY_KEY, Theme, people_queries, pick_theme
 
 log = logging.getLogger(__name__)
 MIX_XFADE = 6.0          # uzun mixte parçalar arası crossfade (sn)
@@ -425,6 +425,15 @@ class Pipeline:
 
     SCENE_SHOT_SEC = 25.0   # çoklu çekimli sahnede her çekimin süresi (ağır çekimle)
     SCENE_SHOT_XFADE = 4.0  # çekimler arası yumuşak geçiş
+    SCENE_MIN_SHOTS = 4
+    SCENE_MAX_SHOTS = 12
+
+    def _scene_shots(self, video_id: int) -> int:
+        """Parça boyunca hiçbir çekim tekrar etmesin diye gereken farklı klip sayısı (4-12)."""
+        t = self.db.track(self.db.video(video_id)["track_id"])
+        dur = float(t["duration_sec"] or 300)
+        need = math.ceil(dur / (self.SCENE_SHOT_SEC - self.SCENE_SHOT_XFADE))
+        return max(self.SCENE_MIN_SHOTS, min(self.SCENE_MAX_SHOTS, need))
 
     def _build_scene(self, video_id: int, theme: Theme, rng: random.Random, people: bool = False) -> bool:
         """Tek, sinematik bir sahne (ör. şömineli oda) — atlamasız döngü; yoksa tek fotoğraf + yavaş yakınlaşma.
@@ -433,15 +442,16 @@ class Pipeline:
         d = self._dir(f"video_{video_id}")
         used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}
         mode = self.db.get_setting("scene_loop") or "auto"
-        if mode == "auto":  # geriye akınca doğal görünen sahnelerde bumerang, diğerlerinde çoklu çekim
-            mode = "pingpong" if theme.key in REVERSIBLE and not people else "sequence"
+        if mode == "auto":  # hep çoklu çekim: aynı 1-2 görüntü dönüp durmasın (bumerang yalnızca istenirse)
+            mode = "sequence"
         elif mode == "pingpong" and people:
             mode = "sequence"
         queries = SCENES[theme.key].queries
         if people:
             t = self.db.track(self.db.video(video_id)["track_id"])
             queries = tuple(dict.fromkeys(people_queries(theme.key, t["series"]) + queries))
-        items = stock.fetch_scene_clips(queries, d / "stock", used, rng, n=3) if mode == "sequence" else []
+        items = (stock.fetch_scene_clips(queries, d / "stock", used, rng, n=self._scene_shots(video_id))
+                 if mode == "sequence" else [])
         if len(items) < 2:  # tek çekimle devam (bulunan tek klip ya da fotoğraf)
             if mode == "sequence":
                 mode = "loop"
@@ -923,8 +933,20 @@ class Pipeline:
         """Kapak adayları: 0 = videodan kare, 1..3 = temaya uygun çift/kadın fotoğrafları (Pexels).
 
         Fotoğraflar bir kez indirilir (thumb_src_N.jpg); metin değişince yalnızca yazı yeniden basılır.
-        Varsayılan kapak: thumb_style=people ise 1. aday, yoksa sahne."""
+        Varsayılan kapak: thumb_style=people ise 1. aday, yoksa sahne.
+        Kendi çektiğin şömine videosu kullanıldıysa: 4 aday da o videodan orijinal kareler (fotoğraf indirilmez)."""
         d = self._dir(f"video_{video_id}")
+        own = self._own_background(video_id)
+        if own:
+            cands = []
+            for n, at in enumerate((0.4, 0.15, 0.65, 0.85)):
+                frame = fireplace.still_frame(own, d / f"thumb_frame_{n}.png", at=at)
+                cands.append(visuals.make_thumbnail(frame, d / f"thumb_{n}.jpg", headline, subline))
+            chosen_file = d / "thumb_choice.txt"
+            choice = int(chosen_file.read_text()) if chosen_file.exists() else 0
+            thumb = cands[choice] if choice < len(cands) else cands[0]
+            self.db.update_video(video_id, thumb_path=str(thumb))
+            return thumb
         cands = [visuals.make_thumbnail(scene_image, d / "thumb_0.jpg", headline, subline)]
         srcs = sorted(d.glob("thumb_src_*.jpg"))
         if not srcs and queries and stock.available() and self.db.get_setting("thumb_style") == "people":
@@ -946,6 +968,13 @@ class Pipeline:
         thumb = cands[choice] if choice < len(cands) else cands[0]
         self.db.update_video(video_id, thumb_path=str(thumb))
         return thumb
+
+    def _own_background(self, video_id: int) -> fireplace.Background | None:
+        """Bu videoda (stok/yapay zeka sahnesi değil) kendi şömine videon kullanıldıysa o video."""
+        d = CONFIG.media_dir / f"video_{video_id}"
+        visual = (d / "visual.txt").read_text().strip() if (d / "visual.txt").exists() else "own"
+        bg = self._background(video_id)
+        return bg if bg and bg.kind == "video" and visual == "own" else None
 
     def thumb_options(self, video_id: int) -> list[Path]:
         d = CONFIG.media_dir / f"video_{video_id}"
