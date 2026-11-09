@@ -68,7 +68,7 @@ def test_uploaded_video_replaces_photos_and_provides_fire_sound(tmp_path):
     assert bg.kind == "video" and bg.path.exists()
     assert [b.kind for b in fireplace.backgrounds()] == ["video"]
     bed = fireplace.ambience_bed()
-    assert bed.name.startswith("fire_audio_")
+    assert not bed.name.startswith("fire_audio_")   # videonun kendi sesi (oda gürültüsü) kullanılmaz
     assert fireplace.remove(bg.name) and not fireplace.backgrounds()[0].kind == "video"
 
 
@@ -128,7 +128,7 @@ def test_4k_link_import_is_downscaled_to_1080p(tmp_path, monkeypatch):
     out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height",
                           "-of", "csv=p=0", str(bg.path)], capture_output=True, text=True).stdout.strip()
     assert out == "1920,1080"
-    assert fireplace.ambience_bed().name.startswith("fire_audio_")  # ses korunmuş, çıtırtı olarak kullanılıyor
+    assert not fireplace.ambience_bed().name.startswith("fire_audio_")  # videonun sesi altına konmaz
 
 
 def test_html_link_gives_clear_error(monkeypatch):
@@ -218,3 +218,53 @@ def test_ratings_steer_background_usage(tmp_path):
     order = pipe._rotation_order(fav, random.Random(1))
     assert names[2] not in [b.name for b in order]           # uzun videoda da yok
     assert order[0].name == names[0]
+
+
+def _noise(path, seconds=20):
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"anoisesrc=d={seconds}:c=brown:a=0.3", str(path)],
+                   check=True, capture_output=True)
+    return path
+
+
+def test_real_fire_sound_from_commons_only_free_license(tmp_path, monkeypatch):
+    import dataclasses
+    fireplace.reset_fire_sound()
+    src = _noise(tmp_path / "Fireplace.ogg")
+    api = {"query": {"pages": {
+        "1": {"index": 1, "title": "File:Copyrighted fire.ogg",
+              "imageinfo": [{"url": "https://x/copy.ogg", "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}}}]},
+        "2": {"index": 2, "title": "File:Fireplace.ogg",
+              "imageinfo": [{"url": "https://x/Fireplace.ogg", "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]},
+    }}}
+    got_urls = []
+
+    class Resp:
+        def __init__(self, url): self.url = url
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def raise_for_status(self): pass
+        def json(self): return api
+        def iter_content(self, n):
+            got_urls.append(self.url)
+            yield src.read_bytes()
+
+    monkeypatch.setattr(fireplace.requests, "get", lambda url, **k: Resp(url))
+    monkeypatch.setattr(fireplace, "CONFIG", dataclasses.replace(fireplace.CONFIG, dry_run=False))
+    try:
+        bed = fireplace.ambience_bed()
+        assert bed.name == "fire_real.m4a" and media.duration(bed) > 10
+        assert got_urls == ["https://x/Fireplace.ogg"]          # yalnızca CC0 / kamu malı
+        assert "Fireplace.ogg" in fireplace.fire_sound_source()
+        assert fireplace.ambience_bed() == bed                  # önbellekten
+    finally:
+        fireplace.reset_fire_sound()
+
+
+def test_uploaded_fire_sound_wins_and_resets(tmp_path):
+    fireplace.reset_fire_sound()
+    with pytest.raises(media.MediaError):
+        fireplace.save_fire_sound(_noise(tmp_path / "short.wav", 5))     # çok kısa
+    out = fireplace.save_fire_sound(_noise(tmp_path / "mine.mp3"))
+    assert fireplace.ambience_bed() == out and "yüklediğin" in fireplace.fire_sound_source()
+    fireplace.reset_fire_sound()
+    assert fireplace.ambience_bed() != out

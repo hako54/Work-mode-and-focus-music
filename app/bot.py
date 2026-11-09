@@ -63,6 +63,8 @@ HELP_PRODUCTION = {
 Bota video/fotoğraf gönder (en fazla 20 MB)
 /video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
 /arkaplan · /arkaplan sil &lt;ad&gt; · /arkaplan yenile [1.25] – yeniden işle + önizleme
+/atessesi – kullanılan gerçek şömine sesini dinlet · /atessesi sifirla
+   Kendi ateş sesinizi kullanmak için bota ses dosyası gönderin (en az 15 sn)
 
 <b>✅ Onay</b>
 Kartta: ✅ Onayla (08:00) · ⚡ Hemen yayınla · ❌ Reddet · 🎵 Müzik / 🖼 Görsel / ✏️ Metin yenile
@@ -115,7 +117,7 @@ class Bot:
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
             "video": self.cmd_video_link, "yogun": self.cmd_boost,
-            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds,
+            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -127,6 +129,8 @@ class Bot:
         media_filter = (filters.VIDEO | filters.PHOTO | filters.ANIMATION | filters.Document.VIDEO
                         | filters.Document.IMAGE)
         self.app.add_handler(MessageHandler(admin & media_filter, self.on_media))
+        sound_filter = filters.AUDIO | filters.VOICE | filters.Document.AUDIO
+        self.app.add_handler(MessageHandler(admin & sound_filter, self.on_fire_sound))
         self.app.add_handler(CallbackQueryHandler(self.on_button))
         # Yetkisiz kullanıcıya kendi ID'sini söyle (ilk kurulum için).
         self.app.add_handler(CommandHandler("start", self.cmd_whoami, filters=~admin))
@@ -853,6 +857,43 @@ class Bot:
             tmp.unlink(missing_ok=True)
             await msg.reply_text(f"⚠️ Arka plan eklenemedi: {str(e)[:500]}")
 
+    async def on_fire_sound(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Gönderilen ses dosyası: tüm videolarda kullanılacak ateş sesi olur."""
+        msg = update.message
+        f = msg.audio or msg.voice or msg.document
+        if (f.file_size or 0) > 20 * 1024 * 1024:
+            await msg.reply_text("⚠️ Telegram botları 20 MB'tan büyük dosyayı indiremez.")
+            return
+        name = getattr(f, "file_name", None) or "fire.ogg"
+        tmp = fireplace.cache_dir() / f"sound_{f.file_unique_id}{Path(name).suffix or '.ogg'}"
+        try:
+            await (await f.get_file()).download_to_drive(tmp)
+            out = await self.run_heavy("ateş sesi", lambda progress: fireplace.save_fire_sound(tmp))
+            with open(out, "rb") as fh:
+                await msg.reply_audio(fh, title="Ateş sesi", caption="🔥 Bundan sonra tüm videolarda bu ateş sesi "
+                                      "kullanılacak. Eski sese dönmek: /atessesi sifirla")
+        except Exception as e:  # noqa: BLE001
+            log.exception("Ateş sesi kaydedilemedi")
+            await msg.reply_text(f"⚠️ Ateş sesi kullanılamadı: {str(e)[:400]}")
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    async def cmd_fire_sound(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/atessesi: şu anki ateş sesini dinlet · /atessesi sifirla: yükleneni sil, gerçek kaydı yeniden ara."""
+        if ctx.args and ctx.args[0].lower() in ("sifirla", "sıfırla", "reset", "sil"):
+            fireplace.reset_fire_sound()
+            await update.message.reply_text("🔄 Ateş sesi sıfırlandı; gerçek şömine kaydı yeniden aranıyor…")
+        bed = await self.run_heavy("ateş sesi", lambda progress: fireplace.ambience_bed())
+        preview = bed.with_name("preview_" + bed.stem + ".mp3")
+        await asyncio.to_thread(media.run, ["ffmpeg", "-y", "-i", str(bed), "-t", "30", "-c:a", "libmp3lame",
+                                            "-b:a", "128k", str(preview)])
+        with open(preview, "rb") as fh:
+            await update.message.reply_audio(
+                fh, title="Ateş sesi", caption=f"🔥 Kullanılan: {fireplace.fire_sound_source()}\n"
+                f"Seviye: %{self.db.get_setting('fire_volume') or 0} (/ayar fire_volume 20)\n"
+                "Kendi kaydınızı kullanmak için bota ses dosyası gönderin.")
+        preview.unlink(missing_ok=True)
+
     STARS = {0: "🚫 kullanılmıyor", 1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
 
     def _rating_keyboard(self, bg) -> InlineKeyboardMarkup:
@@ -878,8 +919,8 @@ class Bot:
 
     async def _reply_background(self, msg, bg) -> None:
         loop = fireplace.loop_for(bg, (1920, 1080))
-        note = ("Bu video(lar) varken fotoğraflar kullanılmaz; ateş sesi videonun kendi sesinden alınır "
-                "(sessizse sentez çıtırtı)." if bg.kind == "video" else
+        note = ("Bu video(lar) varken fotoğraflar kullanılmaz. Videonun kendi sesi kullanılmaz; altına gerçek "
+                "şömine sesi eklenir (/atessesi)." if bg.kind == "video" else
                 "Fotoğraf hafif ışık titremesiyle döngüye çevrildi.")
         with open(loop, "rb") as fh:
             await msg.reply_video(fh, caption=f"✅ Arka plan eklendi: {bg.name}\n{note}\n"

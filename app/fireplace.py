@@ -15,6 +15,7 @@ Hazırlanan dosyalar `DATA_DIR/assets/cache` içinde saklanır; her videoda yeni
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import random
 import shutil
@@ -281,19 +282,49 @@ def animate_fire(image: Path, out: Path, size: tuple[int, int] = (1920, 1080),
 
 
 # ---------------------------------------------------------------------------- ses
+FIRE_SOUND_EXT = {".mp3", ".m4a", ".wav", ".ogg", ".oga", ".flac", ".aac", ".opus", ".mp4", ".mov", ".webm"}
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+COMMONS_QUERIES = ("crackling fireplace", "fireplace fire sound", "wood fire crackling", "campfire crackling")
+FREE_LICENSES = ("cc0", "public domain", "pd")
+UA = {"User-Agent": "EvermoreRomanceBot/1.0 (YouTube music automation; fireplace ambience)"}
+
+
+def user_fire_sound() -> Path:
+    return cache_dir() / "fire_user.m4a"
+
+
+def fire_sound_source() -> str:
+    """Şu an kullanılan ateş sesinin kaynağı (Telegram'da gösterilir)."""
+    if user_fire_sound().exists():
+        return "senin yüklediğin ateş sesi"
+    info = cache_dir() / "fire_real.json"
+    if (cache_dir() / "fire_real.m4a").exists() and info.exists():
+        meta = json.loads(info.read_text())
+        return f"gerçek şömine kaydı: {meta.get('title', '')} ({meta.get('license', '')}, Wikimedia Commons)"
+    if (cache_dir() / "fire_elevenlabs.m4a").exists():
+        return "ElevenLabs ses efekti (gerçek kayıt bulunamadı)"
+    return "sentezlenmiş çıtırtı (gerçek kayıt bulunamadı)"
+
+
 def ambience_bed() -> Path:
-    """Mixin altına döşenecek, dikişsiz tekrar eden ateş sesi (önbellekli)."""
-    for bg in backgrounds():  # 1) kullanıcı videosunun kendi sesi
-        if bg.kind == "video":
-            out = cache_dir() / f"fire_audio_{_key(bg.path)}.m4a"
-            if out.exists():
-                return out
-            try:
-                if _extract_fire_audio(bg.path, out):
-                    return out
-            except media.MediaError as e:
-                log.warning("Videodan ateş sesi alınamadı: %s", e)
-    out = cache_dir() / "fire_elevenlabs.m4a"  # 2) ElevenLabs ses efekti
+    """Müziğin altına döşenecek, dikişsiz tekrar eden GERÇEK ateş sesi (önbellekli).
+
+    Şömine videolarının kendi sesi hiç kullanılmaz (oda gürültüsü vb. olabilir). Sıra:
+    1) Telegram'dan yüklediğin ateş sesi  2) Wikimedia Commons'tan serbest lisanslı (CC0/kamu malı) gerçek
+    şömine kaydı  3) ElevenLabs ses efekti  4) sentez."""
+    if user_fire_sound().exists():
+        return user_fire_sound()
+    real = cache_dir() / "fire_real.m4a"
+    if real.exists():
+        return real
+    if not CONFIG.dry_run:
+        try:
+            got = fetch_real_fire_sound(real)
+            if got:
+                return got
+        except Exception as e:  # noqa: BLE001
+            log.warning("Gerçek ateş sesi indirilemedi: %s", e)
+    out = cache_dir() / "fire_elevenlabs.m4a"
     if out.exists():
         return out
     if CONFIG.elevenlabs_api_key and not CONFIG.dry_run:
@@ -301,10 +332,83 @@ def ambience_bed() -> Path:
             return _elevenlabs_fire(out)
         except Exception as e:  # noqa: BLE001
             log.warning("ElevenLabs ateş sesi üretilemedi (%s), sentez kullanılacak", e)
-    out = cache_dir() / "fire_procedural_v2.m4a"  # 3) sentez
+    out = cache_dir() / "fire_procedural_v2.m4a"
     if not out.exists():
         synth_crackle(out)
     return out
+
+
+def _commons_candidates(query: str) -> list[dict]:
+    r = requests.get(COMMONS_API, headers=UA, timeout=30, params={
+        "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrlimit": 20,
+        "gsrsearch": f"{query} filetype:audio", "prop": "imageinfo", "iiprop": "url|extmetadata|size"})
+    r.raise_for_status()
+    pages = sorted((r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 0))
+    out = []
+    for p in pages:
+        info = (p.get("imageinfo") or [{}])[0]
+        lic = ((info.get("extmetadata") or {}).get("LicenseShortName") or {}).get("value", "")
+        if info.get("url") and lic.strip().lower().startswith(FREE_LICENSES):
+            out.append({"title": p.get("title", "").removeprefix("File:"), "url": info["url"], "license": lic})
+    return out
+
+
+def fetch_real_fire_sound(out: Path) -> Path | None:
+    """Serbest lisanslı gerçek şömine/ateş kaydını indir, kontrol et (en az 15 sn, sessiz değil), döngü yap."""
+    tried: set[str] = set()
+    for q in COMMONS_QUERIES:
+        for c in _commons_candidates(q):
+            if c["url"] in tried:
+                continue
+            tried.add(c["url"])
+            raw = out.with_name("fire_real_dl" + Path(c["url"]).suffix.lower())
+            try:
+                with requests.get(c["url"], headers=UA, stream=True, timeout=120) as r:
+                    r.raise_for_status()
+                    with raw.open("wb") as fh:
+                        for chunk in r.iter_content(1 << 16):
+                            fh.write(chunk)
+                if prepare_fire_sound(raw, out):
+                    (out.with_suffix(".json")).write_text(json.dumps(c))
+                    log.info("Gerçek ateş sesi: %s (%s)", c["title"], c["license"])
+                    return out
+            except (requests.RequestException, media.MediaError) as e:
+                log.warning("Ateş kaydı kullanılamadı (%s): %s", c["title"], e)
+            finally:
+                raw.unlink(missing_ok=True)
+    return None
+
+
+def prepare_fire_sound(src: Path, out: Path) -> bool:
+    """Ses (ya da videonun sesi) -> en fazla 120 sn, dikişsiz döngü, normalize. Uygun değilse False."""
+    has_audio = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                                "stream=index", "-of", "csv=p=0", str(src)], capture_output=True, text=True)
+    if not has_audio.stdout.strip():
+        return False
+    wav = out.with_name(out.stem + ".raw.wav")
+    try:
+        media.run(["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "2", "-ar", str(SR), "-t", "120", str(wav)])
+        if media.duration(wav) < 15 or _mean_volume(wav) < -50:
+            return False
+        tmp = out.with_name(out.stem + ".part.m4a")
+        seamless_audio_loop(wav, tmp, xfade=3.0)
+        tmp.replace(out)
+        return True
+    finally:
+        wav.unlink(missing_ok=True)
+
+
+def save_fire_sound(src: Path) -> Path:
+    """Telegram'dan gelen ateş sesini (ses ya da video dosyası) kullanılacak ses yap."""
+    if not prepare_fire_sound(src, user_fire_sound()):
+        raise media.MediaError("Ses en az 15 saniye olmalı ve duyulabilir olmalı")
+    return user_fire_sound()
+
+
+def reset_fire_sound() -> None:
+    """Yüklenen/indirilen ateş sesini sil; bir sonraki videoda gerçek kayıt yeniden aranır."""
+    for name in ("fire_user.m4a", "fire_real.m4a", "fire_real.json"):
+        (cache_dir() / name).unlink(missing_ok=True)
 
 
 def _mean_volume(path: Path) -> float:
@@ -314,22 +418,6 @@ def _mean_volume(path: Path) -> float:
         if "mean_volume" in line:
             return float(line.split("mean_volume:")[1].split("dB")[0])
     return -99.0
-
-
-def _extract_fire_audio(video: Path, out: Path) -> bool:
-    has_audio = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
-                                "stream=index", "-of", "csv=p=0", str(video)], capture_output=True, text=True)
-    if not has_audio.stdout.strip():
-        return False
-    raw = out.with_suffix(".raw.wav")
-    media.run(["ffmpeg", "-y", "-i", str(video), "-vn", "-ac", "2", "-ar", str(SR), "-t", "120", str(raw)])
-    try:
-        if _mean_volume(raw) < -55:
-            return False
-        seamless_audio_loop(raw, out)
-        return True
-    finally:
-        raw.unlink(missing_ok=True)
 
 
 def _elevenlabs_fire(out: Path) -> Path:

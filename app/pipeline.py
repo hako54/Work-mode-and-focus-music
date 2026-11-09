@@ -542,7 +542,9 @@ class Pipeline:
 
     def _video_audio(self, video_id: int, track_audio: Path) -> Path:
         """Şömine modunda parçanın altına çıtırtı ekle (kütüphanedeki parça temiz kalır)."""
-        if not self._background(video_id) or self._fire_volume() <= 0:
+        theme = self._theme_of(video_id)
+        fire_scene = theme is not None and theme.key == "fireplace"   # stok şömine sahnesinde de ateş sesi
+        if not (self._background(video_id) or fire_scene) or self._fire_volume() <= 0:
             return track_audio
         out = self._dir(f"video_{video_id}") / "audio.mp3"
         return media.add_bed(track_audio, fireplace.ambience_bed(), out, self._fire_volume() / 100,
