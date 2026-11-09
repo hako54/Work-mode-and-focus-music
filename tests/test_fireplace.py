@@ -226,15 +226,45 @@ def _noise(path, seconds=20):
     return path
 
 
+def _crackle(path, rate=6.0, hiss=0.02, seconds=30, seed=1):
+    import wave
+    import numpy as np
+    sr = 22050
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal(sr * seconds) * hiss
+    t = np.arange(int(sr * 0.02))
+    for _ in range(int(seconds * rate)):
+        i = rng.integers(0, x.size - t.size)
+        x[i:i + t.size] += 0.6 * rng.uniform(.3, 1) * np.exp(-t / (sr * 0.002)) * rng.standard_normal(t.size)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes((np.clip(x, -1, 1) * 32000).astype("<i2").tobytes())
+    return path
+
+
+def test_crackle_detection_rejects_hiss(tmp_path):
+    good = fireplace.crackle_stats(_crackle(tmp_path / "logs.wav"))
+    hiss = fireplace.crackle_stats(_crackle(tmp_path / "grass.wav", rate=0.3, hiss=0.15))
+    assert good[0] >= fireplace.MIN_CRACKLES_PER_SEC > hiss[0]
+    assert fireplace.crackle_score(good) > fireplace.crackle_score(hiss)
+
+
 def test_real_fire_sound_from_commons_only_free_license(tmp_path, monkeypatch):
     import dataclasses
     fireplace.reset_fire_sound()
-    src = _noise(tmp_path / "Fireplace.ogg")
+    src = _crackle(tmp_path / "Fireplace.wav")
+    grass = _crackle(tmp_path / "grass.wav", rate=0.3, hiss=0.15)
     api = {"query": {"pages": {
         "1": {"index": 1, "title": "File:Copyrighted fire.ogg",
               "imageinfo": [{"url": "https://x/copy.ogg", "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}}}]},
         "2": {"index": 2, "title": "File:Fireplace.ogg",
               "imageinfo": [{"url": "https://x/Fireplace.ogg", "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]},
+        "3": {"index": 3, "title": "File:Dry grass burning in open fireplace.ogg",
+              "imageinfo": [{"url": "https://x/grass.ogg", "extmetadata": {"LicenseShortName": {"value": "Public domain"}}}]},
+        "4": {"index": 4, "title": "File:Hissy fire.ogg",
+              "imageinfo": [{"url": "https://x/hissy.ogg", "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]},
     }}}
     got_urls = []
 
@@ -246,14 +276,16 @@ def test_real_fire_sound_from_commons_only_free_license(tmp_path, monkeypatch):
         def json(self): return api
         def iter_content(self, n):
             got_urls.append(self.url)
-            yield src.read_bytes()
+            yield (grass if "hissy" in self.url else src).read_bytes()
 
     monkeypatch.setattr(fireplace.requests, "get", lambda url, **k: Resp(url))
     monkeypatch.setattr(fireplace, "CONFIG", dataclasses.replace(fireplace.CONFIG, dry_run=False))
     try:
         bed = fireplace.ambience_bed()
-        assert bed.name == "fire_real.m4a" and media.duration(bed) > 10
-        assert got_urls == ["https://x/Fireplace.ogg"]          # yalnızca CC0 / kamu malı
+        assert bed.name == f"{fireplace.REAL_CACHE}.m4a" and media.duration(bed) > 10
+        assert "https://x/copy.ogg" not in got_urls              # yalnızca CC0 / kamu malı
+        assert "https://x/grass.ogg" not in got_urls             # "kuru ot" gibi ince çızırtılı kayıtlar atlanır
+        assert "https://x/hissy.ogg" in got_urls                 # ölçüldü ama çıtırtısız olduğu için seçilmedi
         assert "Fireplace.ogg" in fireplace.fire_sound_source()
         assert fireplace.ambience_bed() == bed                  # önbellekten
     finally:
