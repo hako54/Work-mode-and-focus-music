@@ -39,6 +39,8 @@ class Config:
     stability_api_key: str = field(default_factory=lambda: _env("STABILITY_API_KEY"))
     # Temaya uygun stok klip/fotoğraf kolajı için (ücretsiz: pexels.com/api)
     pexels_api_key: str = field(default_factory=lambda: _env("PEXELS_API_KEY"))
+    # Gerçek şömine sesi kayıtları (CC0) için, isteğe bağlı (ücretsiz: freesound.org/apiv2/apply)
+    freesound_api_key: str = field(default_factory=lambda: _env("FREESOUND_API_KEY"))
 
     youtube_client_id: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_ID"))
     youtube_client_secret: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_SECRET"))

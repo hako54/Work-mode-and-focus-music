@@ -251,45 +251,54 @@ def test_crackle_detection_rejects_hiss(tmp_path):
     assert fireplace.crackle_score(good) > fireplace.crackle_score(hiss)
 
 
-def test_real_fire_sound_from_commons_only_free_license(tmp_path, monkeypatch):
+def test_fire_sound_candidates_from_pexels_and_freesound(tmp_path, monkeypatch):
     import dataclasses
+    from app import firesound, stock
     fireplace.reset_fire_sound()
-    src = _crackle(tmp_path / "Fireplace.wav")
-    grass = _crackle(tmp_path / "grass.wav", rate=0.3, hiss=0.15)
-    api = {"query": {"pages": {
-        "1": {"index": 1, "title": "File:Copyrighted fire.ogg",
-              "imageinfo": [{"url": "https://x/copy.ogg", "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}}}]},
-        "2": {"index": 2, "title": "File:Fireplace.ogg",
-              "imageinfo": [{"url": "https://x/Fireplace.ogg", "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]},
-        "3": {"index": 3, "title": "File:Dry grass burning in open fireplace.ogg",
-              "imageinfo": [{"url": "https://x/grass.ogg", "extmetadata": {"LicenseShortName": {"value": "Public domain"}}}]},
-        "4": {"index": 4, "title": "File:Hissy fire.ogg",
-              "imageinfo": [{"url": "https://x/hissy.ogg", "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]},
-    }}}
-    got_urls = []
+    good = _crackle(tmp_path / "logs.wav")
+    hiss = _crackle(tmp_path / "grass.wav", rate=0.3, hiss=0.15)
+    good_vid = tmp_path / "good.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=30", "-i", str(good),
+                    "-shortest", "-c:v", "libx264", "-c:a", "aac", str(good_vid)], check=True, capture_output=True)
+    files = {"px1": good_vid, "px2": hiss, "fs7": good}
 
-    class Resp:
-        def __init__(self, url): self.url = url
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
+    def fake_get(path, params):
+        return {"videos": [
+            {"id": 1, "duration": 30, "url": "https://www.pexels.com/video/fireplace-logs-1/",
+             "video_files": [{"file_type": "video/mp4", "width": 640, "link": "px1"},
+                             {"file_type": "video/mp4", "width": 1920, "link": "big"}]},
+            {"id": 2, "duration": 30, "url": "https://www.pexels.com/video/hissy-fire-2/",
+             "video_files": [{"file_type": "video/mp4", "width": 640, "link": "px2"}]},
+            {"id": 3, "duration": 30, "url": "https://www.pexels.com/video/burning-dry-grass-3/",
+             "video_files": [{"file_type": "video/mp4", "width": 640, "link": "px3"}]}]}
+
+    class FsResp:
         def raise_for_status(self): pass
-        def json(self): return api
-        def iter_content(self, n):
-            got_urls.append(self.url)
-            yield (grass if "hissy" in self.url else src).read_bytes()
+        def json(self): return {"results": [{"id": 7, "name": "Fireplace logs", "username": "rec",
+                                             "previews": {"preview-hq-mp3": "fs7"}}]}
 
-    monkeypatch.setattr(fireplace.requests, "get", lambda url, **k: Resp(url))
+    downloaded = []
+
+    def fake_download(url, out):
+        downloaded.append(url)
+        out.write_bytes(files[url].read_bytes())
+        return out
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "_get", fake_get)
+    monkeypatch.setattr(stock, "_download", fake_download)
+    monkeypatch.setattr(firesound.requests, "get", lambda *a, **k: FsResp())
+    monkeypatch.setattr(firesound, "CONFIG", dataclasses.replace(firesound.CONFIG, freesound_api_key="k"))
+    cands = firesound.find_candidates()
+    assert "px3" not in downloaded and "big" not in downloaded       # "dry grass" atlanır, küçük dosya iner
+    assert {c["source"] for c in cands} == {"Pexels video sesi", "Freesound, CC0"}   # çızırtılı px2 elendi
+    assert all(c["crackle"] >= firesound.MIN_CHOICE_CRACKLES for c in cands)
+    chosen = firesound.choose(2)
+    assert fireplace.ambience_bed() == chosen and cands[1]["title"] in fireplace.fire_sound_source()
+    fireplace.reset_fire_sound()
     monkeypatch.setattr(fireplace, "CONFIG", dataclasses.replace(fireplace.CONFIG, dry_run=False))
-    try:
-        bed = fireplace.ambience_bed()
-        assert bed.name == f"{fireplace.REAL_CACHE}.m4a" and media.duration(bed) > 10
-        assert "https://x/copy.ogg" not in got_urls              # yalnızca CC0 / kamu malı
-        assert "https://x/grass.ogg" not in got_urls             # "kuru ot" gibi ince çızırtılı kayıtlar atlanır
-        assert "https://x/hissy.ogg" in got_urls                 # ölçüldü ama çıtırtısız olduğu için seçilmedi
-        assert "Fireplace.ogg" in fireplace.fire_sound_source()
-        assert fireplace.ambience_bed() == bed                  # önbellekten
-    finally:
-        fireplace.reset_fire_sound()
+    auto = fireplace.ambience_bed()                                  # seçim yoksa: otomatik en çıtırtılı
+    assert auto.name == f"{fireplace.AUTO_CACHE}.m4a" and "otomatik" in fireplace.fire_sound_source()
+    fireplace.reset_fire_sound()
 
 
 def test_uploaded_fire_sound_wins_and_resets(tmp_path):

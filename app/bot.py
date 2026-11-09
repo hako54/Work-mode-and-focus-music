@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import fireplace, media, metadata, profiles
+from . import fireplace, firesound, media, metadata, profiles
 from .config import CONFIG
 from .db import Database, parse_iso, utcnow
 from .media import fmt_ts
@@ -63,7 +63,7 @@ HELP_PRODUCTION = {
 Bota video/fotoğraf gönder (en fazla 20 MB)
 /video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
 /arkaplan · /arkaplan sil &lt;ad&gt; · /arkaplan yenile [1.25] – yeniden işle + önizleme
-/atessesi – kullanılan gerçek şömine sesini dinlet · /atessesi sifirla
+/atessesi – kullanılan ateş sesini dinlet · /atessesi ara – gerçek kayıtları dinle, seç · /atessesi sifirla
    Kendi ateş sesinizi kullanmak için bota ses dosyası gönderin (en az 15 sn)
 
 <b>✅ Onay</b>
@@ -437,6 +437,15 @@ class Bot:
                 await q.answer("Yetkiniz yok")
             return
         action, _, raw = (q.data or "").partition(":")
+        if action == "fs":  # ateş sesi adayı seçimi: fs:<n>
+            try:
+                await asyncio.to_thread(firesound.choose, int(raw))
+                await q.answer("Ateş sesi seçildi")
+                await q.message.reply_text(f"✅ {raw}. ses seçildi; bundan sonraki tüm şömineli videolarda bu "
+                                           "kullanılacak. Dinlemek: /atessesi")
+            except Exception as e:  # noqa: BLE001
+                await q.answer(str(e)[:150], show_alert=True)
+            return
         if action == "bgr":  # arka plan puanı: bgr:<id>:<0-5>
             await self.on_bg_rating(q, raw)
             return
@@ -879,7 +888,11 @@ class Bot:
             tmp.unlink(missing_ok=True)
 
     async def cmd_fire_sound(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        """/atessesi: şu anki ateş sesini dinlet · /atessesi sifirla: yükleneni sil, gerçek kaydı yeniden ara."""
+        """/atessesi: şu anki ateş sesini dinlet · /atessesi ara: gerçek kayıt adaylarını dinle, seç ·
+        /atessesi sifirla: seçileni sil (otomatik en çıtırtılı kayıt kullanılır)."""
+        if ctx.args and ctx.args[0].lower() in ("ara", "bul", "secenek", "seçenek", "alternatif"):
+            await self._fire_sound_choices(update)
+            return
         if ctx.args and ctx.args[0].lower() in ("sifirla", "sıfırla", "reset", "sil"):
             fireplace.reset_fire_sound()
             await update.message.reply_text("🔄 Ateş sesi sıfırlandı; gerçek şömine kaydı yeniden aranıyor…")
@@ -893,6 +906,31 @@ class Bot:
                 f"Seviye: %{self.db.get_setting('fire_volume') or 0} (/ayar fire_volume 20)\n"
                 "Kendi kaydınızı kullanmak için bota ses dosyası gönderin.")
         preview.unlink(missing_ok=True)
+
+    async def _fire_sound_choices(self, update: Update) -> None:
+        src = ["Pexels şömine videolarının gerçek sesi"] + (["Freesound CC0 kayıtları"]
+                                                         if CONFIG.freesound_api_key else [])
+        await update.message.reply_text(f"🔎 Gerçek şömine sesleri aranıyor ({' + '.join(src)}); her biri "
+                                        "çıtırtıya göre ölçülüyor. 2-4 dk sürebilir…")
+        cands = await self.run_heavy("ateş sesi adayları", lambda progress: firesound.find_candidates())
+        if not cands:
+            await update.message.reply_text(
+                "😕 Yeterince çıtırtılı gerçek kayıt bulunamadı. En iyi sonuç için telefonla şöminenin yanında "
+                "30-60 sn kayıt alıp bota ses dosyası olarak gönderin." +
+                ("" if CONFIG.freesound_api_key else "\nℹ️ Railway'e FREESOUND_API_KEY eklenirse binlerce CC0 "
+                 "şömine kaydı da aranır (ücretsiz: freesound.org/apiv2/apply)."))
+            return
+        for n, c in enumerate(cands, 1):
+            preview = Path(c["path"]).with_suffix(".preview.mp3")
+            await asyncio.to_thread(media.run, ["ffmpeg", "-y", "-i", c["path"], "-t", "30", "-c:a", "libmp3lame",
+                                                "-b:a", "128k", str(preview)])
+            with open(preview, "rb") as fh:
+                await update.message.reply_audio(
+                    fh, title=f"Ateş sesi {n}", caption=f"🔥 {n}. {c['title']}\n{c['source']} · "
+                    f"{c['crackle']} çıtırtı/sn",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ {n}. sesi kullan",
+                                                                             callback_data=f"fs:{n}")]]))
+            preview.unlink(missing_ok=True)
 
     STARS = {0: "🚫 kullanılmıyor", 1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
 

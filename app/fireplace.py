@@ -283,30 +283,30 @@ def animate_fire(image: Path, out: Path, size: tuple[int, int] = (1920, 1080),
 
 # ---------------------------------------------------------------------------- ses
 FIRE_SOUND_EXT = {".mp3", ".m4a", ".wav", ".ogg", ".oga", ".flac", ".aac", ".opus", ".mp4", ".mov", ".webm"}
-COMMONS_API = "https://commons.wikimedia.org/w/api.php"
-COMMONS_QUERIES = ("crackling fireplace", "fireplace logs crackling", "wood fire crackling", "campfire crackling",
-                   "fireplace", "burning logs")
-BAD_TITLE_WORDS = ("grass", "leaves", "leaf", "paper", "straw", "hay", "wildfire", "forest fire", "gas", "match",
-                   "torch", "candle", "rain", "explosion", "alarm", "engine", "voice", "music", "song")
-MIN_CRACKLES_PER_SEC = 1.5    # gerçek odun çıtırtısı: saniyede birkaç belirgin "çıt"; ince çızırtı ~0
-MAX_CANDIDATES = 10
-REAL_CACHE = "fire_real_v2"   # eski (çızırtılı) seçim yeniden yapılsın diye sürüm
-FREE_LICENSES = ("cc0", "public domain", "pd")
 UA = {"User-Agent": "EvermoreRomanceBot/1.0 (YouTube music automation; fireplace ambience)"}
+MIN_CRACKLES_PER_SEC = 1.5    # gerçek odun çıtırtısı: saniyede birkaç belirgin "çıt"; ince çızırtı ~0
+AUTO_CACHE = "fire_auto_v3"   # otomatik seçilen gerçek kayıt (eski Wikimedia seçimleri kullanılmaz)
 
 
 def user_fire_sound() -> Path:
     return cache_dir() / "fire_user.m4a"
 
 
+def _meta(path: Path) -> dict:
+    info = path.with_suffix(".json")
+    try:
+        return json.loads(info.read_text()) if info.exists() else {}
+    except ValueError:
+        return {}
+
+
 def fire_sound_source() -> str:
     """Şu an kullanılan ateş sesinin kaynağı (Telegram'da gösterilir)."""
-    if user_fire_sound().exists():
-        return "senin yüklediğin ateş sesi"
-    info = cache_dir() / f"{REAL_CACHE}.json"
-    if (cache_dir() / f"{REAL_CACHE}.m4a").exists() and info.exists():
-        meta = json.loads(info.read_text())
-        return f"gerçek şömine kaydı: {meta.get('title', '')} ({meta.get('license', '')}, Wikimedia Commons)"
+    for path, label in ((user_fire_sound(), "seçtiğin/yüklediğin ses"),
+                        (cache_dir() / f"{AUTO_CACHE}.m4a", "otomatik seçilen gerçek kayıt")):
+        if path.exists():
+            m = _meta(path)
+            return f"{label}" + (f": {m['title']} ({m['source']})" if m.get("title") else "")
     if (cache_dir() / "fire_elevenlabs_v2.m4a").exists():
         return "ElevenLabs ses efekti (gerçek kayıt bulunamadı)"
     return "sentezlenmiş çıtırtı (gerçek kayıt bulunamadı)"
@@ -315,21 +315,22 @@ def fire_sound_source() -> str:
 def ambience_bed() -> Path:
     """Müziğin altına döşenecek, dikişsiz tekrar eden GERÇEK ateş sesi (önbellekli).
 
-    Şömine videolarının kendi sesi hiç kullanılmaz (oda gürültüsü vb. olabilir). Sıra:
-    1) Telegram'dan yüklediğin ateş sesi  2) Wikimedia Commons'tan serbest lisanslı (CC0/kamu malı) gerçek
-    şömine kaydı  3) ElevenLabs ses efekti  4) sentez."""
+    Şömine videolarının kendi sesi hiç kullanılmaz. Sıra: 1) /atessesi ara ile seçtiğin ya da yüklediğin ses
+    2) otomatik: Freesound (CC0) + Pexels şömine videolarının gerçek sesi arasından en çıtırtılısı
+    3) ElevenLabs ses efekti  4) sentez."""
     if user_fire_sound().exists():
         return user_fire_sound()
-    real = cache_dir() / f"{REAL_CACHE}.m4a"
-    if real.exists():
-        return real
+    auto = cache_dir() / f"{AUTO_CACHE}.m4a"
+    if auto.exists():
+        return auto
     if not CONFIG.dry_run:
         try:
-            got = fetch_real_fire_sound(real)
+            from . import firesound
+            got = firesound.auto_best(auto)
             if got:
                 return got
         except Exception as e:  # noqa: BLE001
-            log.warning("Gerçek ateş sesi indirilemedi: %s", e)
+            log.warning("Gerçek ateş sesi bulunamadı: %s", e)
     out = cache_dir() / "fire_elevenlabs_v2.m4a"
     if out.exists():
         return out
@@ -341,24 +342,6 @@ def ambience_bed() -> Path:
     out = cache_dir() / "fire_procedural_v2.m4a"
     if not out.exists():
         synth_crackle(out)
-    return out
-
-
-def _commons_candidates(query: str) -> list[dict]:
-    r = requests.get(COMMONS_API, headers=UA, timeout=30, params={
-        "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrlimit": 20,
-        "gsrsearch": f"{query} filetype:audio", "prop": "imageinfo", "iiprop": "url|extmetadata|size"})
-    r.raise_for_status()
-    pages = sorted((r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 0))
-    out = []
-    for p in pages:
-        info = (p.get("imageinfo") or [{}])[0]
-        lic = ((info.get("extmetadata") or {}).get("LicenseShortName") or {}).get("value", "")
-        title = p.get("title", "").lower()
-        if any(w in title for w in BAD_TITLE_WORDS):
-            continue
-        if info.get("url") and lic.strip().lower().startswith(FREE_LICENSES):
-            out.append({"title": p.get("title", "").removeprefix("File:"), "url": info["url"], "license": lic})
     return out
 
 
@@ -389,41 +372,6 @@ def crackle_score(stats: tuple[float, float]) -> float:
     return min(eps, 10.0) - max(0.0, centroid - 3000.0) / 1000.0   # bol çıtırtı iyi, tiz/ince ses kötü
 
 
-def fetch_real_fire_sound(out: Path) -> Path | None:
-    """Serbest lisanslı gerçek şömine kayıtlarını indir, çıtırtısını ölç; en çıtırtılı olanı (çızırtı değil) seç."""
-    tried: set[str] = set()
-    best: tuple[float, Path, dict] | None = None
-    work = cache_dir() / "fire_candidates"
-    work.mkdir(parents=True, exist_ok=True)
-    try:
-        for q in COMMONS_QUERIES:
-            for c in _commons_candidates(q):
-                if c["url"] in tried or len(tried) >= MAX_CANDIDATES:
-                    continue
-                tried.add(c["url"])
-                raw = work / f"c{len(tried)}{Path(c['url']).suffix.lower()}"
-                try:
-                    with requests.get(c["url"], headers=UA, stream=True, timeout=120) as r:
-                        r.raise_for_status()
-                        with raw.open("wb") as fh:
-                            for chunk in r.iter_content(1 << 16):
-                                fh.write(chunk)
-                    st = crackle_stats(raw)
-                    log.info("Ateş kaydı adayı: %s — %.1f çıtırtı/sn, %.0f Hz", c["title"], *st)
-                    if st[0] >= MIN_CRACKLES_PER_SEC and (best is None or crackle_score(st) > best[0]):
-                        best = (crackle_score(st), raw, c)
-                except (requests.RequestException, subprocess.CalledProcessError, OSError) as e:
-                    log.warning("Ateş kaydı indirilemedi (%s): %s", c["title"], e)
-        if best and prepare_fire_sound(best[1], out):
-            out.with_suffix(".json").write_text(json.dumps(best[2]))
-            log.info("Gerçek ateş sesi: %s (%s)", best[2]["title"], best[2]["license"])
-            return out
-        log.warning("Yeterince çıtırtılı gerçek ateş kaydı bulunamadı (%d aday)", len(tried))
-        return None
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
 # Sıcak şömine tınısı: tiz hışırtıyı kıs, alçak gürlemeyi biraz artır
 WARM_FIRE = "highpass=f=40,lowshelf=f=180:g=3,highshelf=f=4500:g=-6,lowpass=f=9000"
 
@@ -452,12 +400,13 @@ def save_fire_sound(src: Path) -> Path:
     """Telegram'dan gelen ateş sesini (ses ya da video dosyası) kullanılacak ses yap."""
     if not prepare_fire_sound(src, user_fire_sound()):
         raise media.MediaError("Ses en az 15 saniye olmalı ve duyulabilir olmalı")
+    user_fire_sound().with_suffix(".json").write_text(json.dumps({"title": "yüklediğin kayıt", "source": "Telegram"}))
     return user_fire_sound()
 
 
 def reset_fire_sound() -> None:
     """Yüklenen/indirilen ateş sesini sil; bir sonraki videoda gerçek kayıt yeniden aranır."""
-    for name in ("fire_user.m4a", "fire_real.m4a", "fire_real.json", f"{REAL_CACHE}.m4a", f"{REAL_CACHE}.json"):
+    for name in ("fire_user.m4a", "fire_user.json", f"{AUTO_CACHE}.m4a", f"{AUTO_CACHE}.json"):
         (cache_dir() / name).unlink(missing_ok=True)
 
 
