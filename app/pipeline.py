@@ -106,6 +106,7 @@ class Pipeline:
     def create_daily(self, style_key: str | None = None, progress: Progress = _noop,
                      theme_key: str | None = None, auto: bool = False, visual: str | None = None,
                      series_key: str | None = None) -> int:
+        self.ensure_space(self.DAILY_BYTES, "kısa video", progress)
         rng = random.Random()
         romantic = profiles.current().key == "romantic"
         ser = None
@@ -182,6 +183,7 @@ class Pipeline:
 
     def create_daily_from_track(self, track_id: int, progress: Progress = _noop, auto: bool = False) -> int:
         """Kütüphanedeki hazır bir parçadan video yap (yeni müzik üretmez, kredi harcamaz)."""
+        self.ensure_space(self.DAILY_BYTES, "kısa video", progress)
         rng = random.Random()
         t = self.db.track(track_id)
         style = STYLE_BY_KEY.get(t["style_key"], active_styles()[0])
@@ -806,12 +808,20 @@ class Pipeline:
             progress(f"{ser.emoji} {ser.label} serisinin en çok dinlenenleri derleniyor")
         chosen = self.select_compilation_tracks(series_key=comp_series)
         total = sum(c["duration"] - x for c in chosen)
+        self.housekeeping()
+        fit = (self.free_bytes() - self.SAFETY_BYTES) / self.COMP_BYTES_PER_SEC   # diske sığan en uzun süre
+        if fit < 3600:
+            self.ensure_space(self.compilation_bytes(3600), "en az 1 saatlik uzun video", progress)
+        if fit < max_range:
+            log.info("Disk için derleme süresi %s ile sınırlandı", media.fmt_long(fit))
+            max_range = int(fit)
+            min_sec = min(min_sec, max_range)
 
         if total < min_sec and self.db.get_setting("compilation_fill") == "repeat":
             # Kredisiz: en çok dinlenenler sırasıyla tekrar edilerek hedef süreye tamamlanır.
             if not chosen:
                 raise ValueError("Derlenecek yayınlanmış parça yok; önce birkaç parça videosu yayınlanmalı.")
-            lo = min_sec
+            lo = min(min_sec, max_range)
             hi = max(lo, max_range)
             target = rng.randint(lo, hi)
             base = list(chosen)
@@ -842,6 +852,7 @@ class Pipeline:
 
         styles = [c["style_key"] for c in chosen]
         main_style = STYLE_BY_KEY[max(set(styles), key=styles.count)]
+        self.ensure_space(self.compilation_bytes(total), "uzun video", progress)
         video_id = self.db.add_video(kind="compilation", style_key=main_style.key, status="building",
                                      series=comp_series)
         if comp_series:
@@ -867,8 +878,77 @@ class Pipeline:
             self.db.update_video(video_id, status="pending")
         except Exception as e:
             self.db.update_video(video_id, status="failed", error=str(e)[:1000])
+            self.housekeeping()  # yarım kalan dev dosyalar diski doldurmasın
             raise
         return video_id
+
+    # ------------------------------------------------------------------ disk
+    COMP_BYTES_PER_SEC = 2.6e9 / (3 * 3600)   # 3 saatlik şömine derlemesi ≈ 2,5 GB video + ses
+    SAFETY_BYTES = 400e6
+    DAILY_BYTES = int(600e6)                  # kısa video + Short + sahne klipleri
+
+    def free_bytes(self) -> int:
+        return shutil.disk_usage(CONFIG.data_dir).free
+
+    def compilation_bytes(self, seconds: float) -> int:
+        return int(seconds * self.COMP_BYTES_PER_SEC + self.SAFETY_BYTES)
+
+    def housekeeping(self) -> int:
+        """Gereksiz büyük dosyaları sil; kazanılan bayt. Parça sesleri (track_*) derlemeler için kalır.
+
+        - reddedilen / başarısız videoların klasörleri,
+        - YouTube'a yüklenmiş videoların mp4'leri ve ara dosyaları,
+        - yarım kalan render/indirme klasörleri ve geçici önbellek dosyaları."""
+        before = self.free_bytes()
+        media_dir = CONFIG.media_dir
+        for row in self.db.query("SELECT id, kind, status, video_path FROM videos WHERE status IN "
+                                 "('rejected', 'failed', 'scheduled', 'published')"):
+            d = media_dir / f"video_{row['id']}"
+            if not d.exists():
+                continue
+            if row["status"] in ("rejected", "failed"):
+                shutil.rmtree(d, ignore_errors=True)
+            else:
+                self._cleanup_after_upload(row)
+        for d in media_dir.glob("video_*/*"):
+            if d.is_dir() and (d.name in ("rotation", "stock", "thumb_dl") or d.name.startswith(("_segs_", "_pp_"))):
+                shutil.rmtree(d, ignore_errors=True)
+        cache = fireplace.cache_dir()
+        for pattern in ("upload_*", "sound_*", "*.part.*", "*.tmp.*", "preview_*.mp3", "*.raw.*"):
+            for f in cache.glob(pattern):
+                f.unlink(missing_ok=True)
+        shutil.rmtree(cache / "fire_pick", ignore_errors=True)
+        shutil.rmtree(cache / "fire_candidates", ignore_errors=True)
+        freed = max(0, self.free_bytes() - before)
+        if freed:
+            log.info("Disk temizliği: %.0f MB boşaldı, boş alan %.2f GB", freed / 1e6, self.free_bytes() / 1e9)
+        return freed
+
+    def big_pending(self) -> list[tuple[int, str, float]]:
+        """Onay bekleyen ve yer tutan videolar: (id, tür, GB)."""
+        out = []
+        for row in self.db.query("SELECT id, kind, video_path FROM videos WHERE status = 'pending' "
+                                 "AND video_path IS NOT NULL"):
+            p = Path(row["video_path"])
+            if p.exists():
+                out.append((row["id"], row["kind"], p.stat().st_size / 1e9))
+        return sorted(out, key=lambda x: -x[2])
+
+    def ensure_space(self, need: int, what: str, progress: Progress = _noop) -> None:
+        if self.free_bytes() >= need:
+            return
+        progress("🧹 Disk dolu, eski dosyalar temizleniyor")
+        self.housekeeping()
+        free = self.free_bytes()
+        if free >= need:
+            return
+        pend = ", ".join(f"#{i} ({'uzun' if k in LONG_KINDS else 'kısa'}, {gb:.1f} GB)"
+                         for i, k, gb in self.big_pending()[:4])
+        raise ValueError(
+            f"Diskte yer yok: {what} için ~{need / 1e9:.1f} GB gerekli, boş {free / 1e9:.1f} GB "
+            f"(Railway diski 5 GB). " + (f"Onay bekleyen videolar yer tutuyor: {pend}. Yükleyin (/onayla) ya da "
+                                         "reddedin (/reddet), sonra tekrar deneyin." if pend else
+                                         "/ayar compilation_max_min ile süreyi kısaltın."))
 
     def fireplace_on(self) -> bool:
         return self.db.get_setting("fireplace") == "1" and bool(fireplace.backgrounds())

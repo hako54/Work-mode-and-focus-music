@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import fireplace, firesound, media, metadata, profiles
+from . import fireplace, firesound, media, metadata, profiles, youtube
 from .config import CONFIG
 from .db import Database, parse_iso, utcnow
 from .media import fmt_ts
@@ -63,6 +63,7 @@ HELP_PRODUCTION = {
 Bota video/fotoğraf gönder (en fazla 20 MB)
 /video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
 /arkaplan · /arkaplan sil &lt;ad&gt; · /arkaplan yenile [1.25] – yeniden işle + önizleme
+/youtube – YouTube bağlantısı düştüyse yeniden bağla
 /atessesi – kullanılan ateş sesini dinlet · /atessesi ara – gerçek kayıtları dinle, seç · /atessesi sifirla
    Kendi ateş sesinizi kullanmak için bota ses dosyası gönderin (en az 15 sn)
 
@@ -117,7 +118,7 @@ class Bot:
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
             "video": self.cmd_video_link, "yogun": self.cmd_boost,
-            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound,
+            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -416,6 +417,9 @@ class Bot:
                               "<b>Visibility → Public</b> yapın (API audit olmadan YouTube böyle kilitler).")
         except Exception as e:  # noqa: BLE001
             log.exception("Yükleme hatası")
+            if youtube.is_expired_error(e):
+                await self.notify(f"⚠️ #{vid} yüklenemedi: {self.YT_EXPIRED}")
+                return
             await self.notify(f"⚠️ #{vid} yüklenemedi, onay bekliyor olarak kaldı:\n"
                               f"<code>{html.escape(str(e)[:800])}</code>\nTekrar denemek için /onayla {vid}")
 
@@ -614,7 +618,8 @@ class Bot:
         await update.message.reply_html(
             f"<b>Durum</b>: {'⏸ DURAKLATILDI' if self.paused() else '▶️ çalışıyor'}"
             f"{' · DRY_RUN' if CONFIG.dry_run else ''}\n"
-            f"Meşgul: {'evet' if self.busy.locked() else 'hayır'} · {due}\n\n"
+            f"Meşgul: {'evet' if self.busy.locked() else 'hayır'} · {due}\n"
+            f"💾 Disk: {self.pipe.free_bytes() / 1e9:.1f} GB boş\n\n"
             f"<b>Sıradaki işler</b>\n{nxt}\n\n<b>Son videolar</b>\n{lines or '-'}")
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -771,7 +776,7 @@ class Bot:
         else:
             lines.append(("✅" if CONFIG.stability_api_key else "❌") + " Stability (görsel)"
                          + ("" if CONFIG.stability_api_key else " – yoksa prosedürel görsel"))
-        if CONFIG.youtube_client_id and CONFIG.youtube_client_secret and CONFIG.youtube_refresh_token:
+        if CONFIG.youtube_client_id and CONFIG.youtube_client_secret and youtube.refresh_token():
             try:  # DRY_RUN açıkken de bağlantıyı doğrula (yükleme yapmadan)
                 from .youtube import YouTube
                 ch = await asyncio.to_thread(lambda: YouTube().channel())
@@ -886,6 +891,39 @@ class Bot:
             await msg.reply_text(f"⚠️ Ateş sesi kullanılamadı: {str(e)[:400]}")
         finally:
             tmp.unlink(missing_ok=True)
+
+    YT_EXPIRED = ("<b>YouTube bağlantısının süresi doldu</b> (Google izni geçersiz). Videolar silinmedi, onay "
+                  "bekliyor. Yeniden bağlamak için /youtube yazın (2 dk, bilgisayar gerekmez).")
+
+    async def cmd_youtube(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/youtube: yeniden bağlanma linki · /youtube <yönlendirilen adres ya da kod>: bağlantıyı kaydet."""
+        args = ctx.args or []
+        redirect = "playground" if args and args[0].lower() == "playground" else "localhost"
+        if args and args[0].lower() == "playground":
+            args = args[1:]
+        if not args:
+            url = youtube.auth_url(redirect)
+            await update.message.reply_html(
+                "🔗 <b>YouTube'u yeniden bağla</b>\n"
+                f"1) Bu linki açın: <a href=\"{html.escape(url)}\">Google ile giriş</a>\n"
+                "2) Kanalın sahibi hesabı (ve Evermore Romance Piano kanalını) seçin, izin verin. "
+                "\"Google bu uygulamayı doğrulamadı\" çıkarsa <i>Gelişmiş → devam et</i>.\n"
+                "3) Sonunda açılmayan bir sayfa (localhost) gelir; <b>adres çubuğundaki tüm adresi</b> kopyalayıp "
+                "buraya şöyle yazın:\n<code>/youtube http://localhost/?code=...</code>\n\n"
+                "ℹ️ Google 'redirect_uri_mismatch' derse: <code>/youtube playground</code> deneyin.\n"
+                "⚠️ Kalıcı olması için Google Cloud → OAuth consent screen → <b>Publishing status: In production</b> "
+                "olmalı; <i>Testing</i>'de bağlantı 7 günde bir düşer.")
+            return
+        try:
+            await asyncio.to_thread(youtube.exchange_code, " ".join(args), redirect)
+            ch = await asyncio.to_thread(lambda: youtube.YouTube().channel())
+            self.db.set_setting("warned_yt_expired", "0")
+            pend = self.db.query("SELECT id FROM videos WHERE status = 'pending' AND kind != 'short'")
+            await update.message.reply_html(
+                f"✅ YouTube yeniden bağlandı: <b>{html.escape(str(ch.get('title', ch)))}</b>\n" +
+                (f"Onay bekleyenler: {', '.join('#' + str(r['id']) for r in pend)} — /bekleyenler" if pend else ""))
+        except Exception as e:  # noqa: BLE001
+            await update.message.reply_text(f"⚠️ Bağlanamadı: {str(e)[:400]}\nLinki yeniden almak için /youtube")
 
     async def cmd_fire_sound(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """/atessesi: şu anki ateş sesini dinlet · /atessesi ara: gerçek kayıt adaylarını dinle, seç ·
@@ -1071,8 +1109,12 @@ class Bot:
 
     # ------------------------------------------------------------------ jobs
     async def job_reschedule(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        """Gece yarısı: yoğun dönem başladı/bittiyse üretim saatlerini yeniden kur."""
+        """Gece yarısı: yoğun dönem başladı/bittiyse üretim saatlerini yeniden kur; diski temizle."""
         self.schedule_jobs()
+        try:
+            await asyncio.to_thread(self.pipe.housekeeping)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Disk temizliği yapılamadı: %s", e)
 
     async def job_daily(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self.paused():
@@ -1175,6 +1217,9 @@ class Bot:
             await asyncio.to_thread(self.pipe.refresh_stats)
         except Exception as e:  # noqa: BLE001
             log.warning("İstatistik güncellenemedi: %s", e)
+            if youtube.is_expired_error(e) and self.db.get_setting("warned_yt_expired") != "1":
+                self.db.set_setting("warned_yt_expired", "1")
+                await self.notify(f"⚠️ {self.YT_EXPIRED}")
             return
         locked = self.pipe.locked_private()
         if locked and self.db.get_setting("warned_locked") != "1":

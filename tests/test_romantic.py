@@ -730,3 +730,76 @@ def test_long_videos_wait_for_enough_distinct_tracks(pipe):
     assert pipe.compilation_range("jazz") == (120 * 60, 180 * 60)
     db.set_setting("compilation_min_tracks", "3")
     assert pipe.compilation_ready()
+
+
+def test_housekeeping_and_disk_guard(pipe, monkeypatch):
+    from app.config import CONFIG
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    vid = pipe.create_daily(series_key="romance")
+    d = Path(db.video(vid)["video_path"]).parent
+    junk = d / "rotation"
+    junk.mkdir()
+    (junk / "x.mp4").write_bytes(b"0" * 1000)
+    db.update_video(vid, status="rejected")
+    pipe.housekeeping()
+    assert not d.exists()                                         # reddedilen videonun dosyaları silindi
+    keep = pipe.create_daily(series_key="romance")
+    db.update_video(keep, status="published")
+    pipe.housekeeping()
+    assert not Path(db.video(keep)["video_path"]).exists()        # YouTube'a yüklenmiş mp4 silindi
+    assert Path(db.track(db.video(keep)["track_id"])["audio_path"]).exists()   # parça derleme için kalır
+
+    pend = pipe.create_daily(series_key="romance")
+    monkeypatch.setattr(pipe, "free_bytes", lambda: int(100e6))
+    with pytest.raises(ValueError, match=f"#{pend}"):              # yer yok: hangi video yer tutuyor söylenir
+        pipe.create_daily(series_key="romance")
+
+
+def test_compilation_shortened_to_fit_disk(pipe, monkeypatch):
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    for _ in range(3):
+        v = pipe.create_daily(series_key="jazz")
+        pipe.approve(v)
+        db.update_video(v, status="published", views=5)
+    db.set_setting("compilation_min_tracks", "3")
+    db.set_setting("compilation_min_min", "3")
+    db.set_setting("compilation_max_min", "4")
+    monkeypatch.setattr(pipe, "COMP_BYTES_PER_SEC", 1.0)
+    monkeypatch.setattr(pipe, "SAFETY_BYTES", 0)
+    monkeypatch.setattr(pipe, "free_bytes", lambda: 3700)          # ~1 sa sığıyor (test ölçeğinde)
+    monkeypatch.setattr(pipe, "ensure_space", lambda *a, **k: None)
+    rng_target = []
+    orig = random.Random.randint
+    monkeypatch.setattr(random.Random, "randint", lambda self, a, b: rng_target.append((a, b)) or orig(self, a, b))
+    try:
+        pipe.create_compilation()
+    except Exception:  # noqa: BLE001 — burada yalnızca hedef süre sınırı ölçülüyor
+        pass
+    assert rng_target and rng_target[0][1] <= 3700
+
+
+def test_youtube_reconnect_from_telegram(monkeypatch):
+    import dataclasses
+    from app import youtube
+    monkeypatch.setattr(youtube, "CONFIG", dataclasses.replace(youtube.CONFIG, youtube_client_id="cid",
+                                                               youtube_client_secret="sec",
+                                                               youtube_refresh_token="old"))
+    youtube.token_file().unlink(missing_ok=True)
+    assert youtube.refresh_token() == "old"
+    url = youtube.auth_url()
+    assert "client_id=cid" in url and "access_type=offline" in url and "prompt=consent" in url
+    sent = {}
+
+    class Resp:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        def json(self): return {"refresh_token": "new-token"}
+
+    monkeypatch.setattr(youtube.requests, "post", lambda url, data, timeout: sent.update(data) or Resp())
+    youtube.exchange_code("http://localhost/?code=4/abc&scope=x")
+    assert sent["code"] == "4/abc" and sent["redirect_uri"] == "http://localhost"
+    assert youtube.refresh_token() == "new-token"
+    assert youtube.is_expired_error(Exception("invalid_grant: Token has been expired or revoked."))
+    youtube.token_file().unlink()

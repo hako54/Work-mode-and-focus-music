@@ -349,7 +349,9 @@ def crackle_stats(path: Path, seconds: float = 60.0) -> tuple[float, float]:
     """(saniyedeki belirgin çıtırtı sayısı, spektral ağırlık merkezi Hz). Çızırtı/hışırtı: ~0 çıtırtı."""
     sr = 22050
     proc = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-t", str(seconds), "-ac", "1", "-ar", str(sr),
-                           "-f", "f32le", "-"], capture_output=True, check=True)
+                           "-f", "f32le", "-"], capture_output=True)
+    if proc.returncode != 0:   # ör. sessiz (ses kanalı olmayan) video
+        return 0.0, 0.0
     x = np.frombuffer(proc.stdout, "<f4").astype(np.float64)
     if x.size < sr * 5:
         return 0.0, 0.0

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import logging
 import time
+from urllib.parse import parse_qs, urlencode, urlparse
+
+import requests
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +21,43 @@ log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 MUSIC_CATEGORY = "10"
+REDIRECTS = {"localhost": "http://localhost", "playground": "https://developers.google.com/oauthplayground"}
+
+
+def token_file() -> Path:
+    return CONFIG.data_dir / "youtube_refresh_token.txt"
+
+
+def refresh_token() -> str:
+    """Telegram'dan (/youtube) yenilenen token varsa o, yoksa Railway'deki YOUTUBE_REFRESH_TOKEN."""
+    f = token_file()
+    if f.exists() and f.read_text().strip():
+        return f.read_text().strip()
+    return CONFIG.youtube_refresh_token
+
+
+def is_expired_error(e: Exception) -> bool:
+    return "invalid_grant" in str(e)
+
+
+def auth_url(redirect: str = "localhost") -> str:
+    return "https://accounts.google.com/o/oauth2/auth?" + urlencode({
+        "client_id": CONFIG.youtube_client_id, "redirect_uri": REDIRECTS[redirect], "response_type": "code",
+        "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "consent"})
+
+
+def exchange_code(text: str, redirect: str = "localhost") -> str:
+    """Yönlendirilen adres (…?code=…) ya da yalnızca kod -> yeni refresh token (kaydedilir)."""
+    text = text.strip()
+    code = parse_qs(urlparse(text).query).get("code", [text])[0] if "code=" in text else text
+    r = requests.post("https://oauth2.googleapis.com/token", timeout=30, data={
+        "code": code, "client_id": CONFIG.youtube_client_id, "client_secret": CONFIG.youtube_client_secret,
+        "redirect_uri": REDIRECTS[redirect], "grant_type": "authorization_code"})
+    data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+    if r.status_code != 200 or not data.get("refresh_token"):
+        raise YouTubeError(f"Google kodu kabul etmedi: {data.get('error_description') or data.get('error') or r.text[:200]}")
+    token_file().write_text(data["refresh_token"])
+    return data["refresh_token"]
 
 
 class YouTubeError(RuntimeError):
@@ -26,11 +66,11 @@ class YouTubeError(RuntimeError):
 
 class YouTube:
     def __init__(self) -> None:
-        if not (CONFIG.youtube_client_id and CONFIG.youtube_client_secret and CONFIG.youtube_refresh_token):
+        if not (CONFIG.youtube_client_id and CONFIG.youtube_client_secret and refresh_token()):
             raise YouTubeError("YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET / YOUTUBE_REFRESH_TOKEN eksik")
         creds = Credentials(
             None,
-            refresh_token=CONFIG.youtube_refresh_token,
+            refresh_token=refresh_token(),
             token_uri="https://oauth2.googleapis.com/token",
             client_id=CONFIG.youtube_client_id,
             client_secret=CONFIG.youtube_client_secret,
