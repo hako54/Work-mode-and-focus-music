@@ -766,7 +766,7 @@ def test_compilation_shortened_to_fit_disk(pipe, monkeypatch):
     db.set_setting("compilation_min_tracks", "3")
     db.set_setting("compilation_min_min", "3")
     db.set_setting("compilation_max_min", "4")
-    monkeypatch.setattr(pipe, "COMP_BYTES_PER_SEC", 1.0)
+    monkeypatch.setattr(pipe, "_measured_bytes_per_sec", lambda: 1.0)
     monkeypatch.setattr(pipe, "SAFETY_BYTES", 0)
     monkeypatch.setattr(pipe, "free_bytes", lambda: 3700)          # ~1 sa sığıyor (test ölçeğinde)
     monkeypatch.setattr(pipe, "ensure_space", lambda *a, **k: None)
@@ -803,3 +803,8 @@ def test_youtube_reconnect_from_telegram(monkeypatch):
     assert youtube.refresh_token() == "new-token"
     assert youtube.is_expired_error(Exception("invalid_grant: Token has been expired or revoked."))
     youtube.token_file().unlink()
+
+
+def test_compilation_size_measured_from_real_loops(pipe):
+    rate = pipe._measured_bytes_per_sec()        # testte paketteki şömine fotoğrafının döngüsü ölçülür
+    assert rate > pipe.AUDIO_BYTES_PER_SEC

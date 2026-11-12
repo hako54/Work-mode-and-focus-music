@@ -809,6 +809,7 @@ class Pipeline:
         chosen = self.select_compilation_tracks(series_key=comp_series)
         total = sum(c["duration"] - x for c in chosen)
         self.housekeeping()
+        self.COMP_BYTES_PER_SEC = self._measured_bytes_per_sec()
         fit = (self.free_bytes() - self.SAFETY_BYTES) / self.COMP_BYTES_PER_SEC   # diske sığan en uzun süre
         if fit < 3600:
             self.ensure_space(self.compilation_bytes(3600), "en az 1 saatlik uzun video", progress)
@@ -886,6 +887,22 @@ class Pipeline:
     COMP_BYTES_PER_SEC = 2.6e9 / (3 * 3600)   # 3 saatlik şömine derlemesi ≈ 2,5 GB video + ses
     SAFETY_BYTES = 400e6
     DAILY_BYTES = int(600e6)                  # kısa video + Short + sahne klipleri
+
+    AUDIO_BYTES_PER_SEC = 2 * 192_000 / 8    # mix.mp3 + videodaki ses
+
+    def _measured_bytes_per_sec(self) -> float:
+        """Gerçek döngü dosyalarından ölçülen bayt/sn (en büyük şömine videosu) + ses, %15 pay."""
+        rates = []
+        if self.fireplace_on():
+            self._sync_bg_slow()
+            for bg in fireplace.backgrounds():
+                try:
+                    loop = fireplace.loop_for(bg, (1920, 1080))
+                    rates.append(loop.stat().st_size / max(1.0, media.duration(loop)))
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Döngü boyutu ölçülemedi (%s): %s", bg.name, e)
+        video = max(rates) if rates else type(self).COMP_BYTES_PER_SEC
+        return video * 1.15 + self.AUDIO_BYTES_PER_SEC
 
     def free_bytes(self) -> int:
         return shutil.disk_usage(CONFIG.data_dir).free

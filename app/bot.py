@@ -194,6 +194,8 @@ class Bot:
                     jq.run_daily(self.job_daily, time(t.hour, t.minute, tzinfo=self.tz), name=f"daily_{n + 2}",
                                  data=n + 1)
             jq.run_daily(self.job_compilation, comp, name="compilation")
+            if datetime.now(self.tz).time() > comp.replace(tzinfo=None):  # bugünkü uzun video kaçtıysa (hata/yeniden başlatma) telafi
+                jq.run_once(self.job_compilation, 180, name="compilation_catchup")
             jq.run_daily(self.job_reschedule, time(0, 5, tzinfo=self.tz), name="reschedule")
         jq.run_repeating(self.job_stats, interval=6 * 3600, first=120, name="stats")
         jq.run_repeating(self.job_reminders, interval=1800, first=300, name="reminders")
@@ -923,6 +925,7 @@ class Bot:
                 f"✅ YouTube yeniden bağlandı: <b>{html.escape(str(ch.get('title', ch)))}</b>\n" +
                 (f"Onay bekleyenler: {', '.join('#' + str(r['id']) for r in pend)} — /bekleyenler" if pend else ""))
         except Exception as e:  # noqa: BLE001
+            log.warning("YouTube yeniden bağlanamadı: %s", e)
             await update.message.reply_text(f"⚠️ Bağlanamadı: {str(e)[:400]}\nLinki yeniden almak için /youtube")
 
     async def cmd_fire_sound(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
