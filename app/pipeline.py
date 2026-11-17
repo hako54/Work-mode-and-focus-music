@@ -5,6 +5,7 @@ import logging
 import math
 import random
 import shutil
+import time as time_mod
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
@@ -934,12 +935,26 @@ class Pipeline:
         for pattern in ("upload_*", "sound_*", "*.part.*", "*.tmp.*", "preview_*.mp3", "*.raw.*"):
             for f in cache.glob(pattern):
                 f.unlink(missing_ok=True)
+        week2 = time_mod.time() - 14 * 86400   # 14 gündür kullanılmayan (ör. eski ayarlı) arka plan döngüleri
+        for f in list(cache.glob("loop_*.mp4")) + list(cache.glob("preview_loop_*.mp4")):
+            if f.stat().st_mtime < week2:
+                f.unlink(missing_ok=True)
         shutil.rmtree(cache / "fire_pick", ignore_errors=True)
         shutil.rmtree(cache / "fire_candidates", ignore_errors=True)
         freed = max(0, self.free_bytes() - before)
         if freed:
             log.info("Disk temizliği: %.0f MB boşaldı, boş alan %.2f GB", freed / 1e6, self.free_bytes() / 1e9)
         return freed
+
+    def disk_report(self) -> str:
+        """Diskte ne ne kadar yer tutuyor (GB)."""
+        def size(p: Path) -> float:
+            return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / 1e9 if p.exists() else 0.0
+        parts = {"videolar": sum(size(d) for d in CONFIG.media_dir.glob("video_*")),
+                 "parçalar": sum(size(d) for d in CONFIG.media_dir.glob("track_*")),
+                 "şömine videoların": size(fireplace.user_dir()),
+                 "döngü önbelleği": size(fireplace.cache_dir())}
+        return " · ".join(f"{k} {v:.1f}" for k, v in parts.items()) + f" · boş {self.free_bytes() / 1e9:.1f} GB"
 
     def big_pending(self) -> list[tuple[int, str, float]]:
         """Onay bekleyen ve yer tutan videolar: (id, tür, GB)."""

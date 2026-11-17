@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import random
 import shutil
 import subprocess
@@ -37,6 +38,9 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 FIRE_LOOP_SECONDS = 12
 LOOP_CRF = 27  # ateş çok detaylı; 23'te 3 saatlik video ~4,7 GB olur, 27'de ~2,5 GB
+# 4K'dan gelen ateş videoları CRF 27'de bile ~9 Mbps olabiliyor (3 saat ≈ 12 GB, 5 GB diske sığmaz):
+# döngülerin bit hızı sınırlanır. 2 Mbps'de 3 saatlik uzun video ≈ 2,7 GB.
+LOOP_MAXRATE = ["-maxrate", "2000k", "-bufsize", "4000k"]
 CRACKLE_SECONDS = 60
 SR = 44100
 
@@ -156,9 +160,10 @@ def loop_for(bg: Background, size: tuple[int, int]) -> Path:
     """Arka plan için (önbellekli) dikişsiz döngü klibi; videolara BG_SLOW kadar ağır çekim uygulanır."""
     w, h = size
     slow = round(max(1.0, BG_SLOW), 2) if bg.kind == "video" else 1.0
-    extra = ("flicker-v2",) if slow == 1.0 else ("flicker-v2", f"slow{slow}")
+    extra = ("flicker-v2", "cap2000") if slow == 1.0 else ("flicker-v2", f"slow{slow}", "cap2000")
     out = cache_dir() / f"loop_{_key(bg.path, w, h, LOOP_CRF, *extra)}.mp4"
     if out.exists():
+        os.utime(out)  # kullanıldı: eski döngü temizliğinde silinmesin
         return out
     tmp = out.with_suffix(".tmp.mp4")
     if bg.kind == "video":
@@ -209,7 +214,7 @@ def seamless_video_loop(src: Path, out: Path, size: tuple[int, int], max_seconds
     tmp = out.with_name(out.stem + ".part.mp4")  # başarısız olursa yarım dosya geride kalmasın
     try:
         media.run(["ffmpeg", "-y", "-i", str(src), "-filter_complex", fc, "-map", "[out]", "-an",
-                   "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(media.FPS * 2),
+                   "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), *LOOP_MAXRATE, "-g", str(media.FPS * 2),
                    "-pix_fmt", "yuv420p", str(tmp)])
         tmp.replace(out)
     finally:
@@ -256,7 +261,7 @@ def animate_fire(image: Path, out: Path, size: tuple[int, int] = (1920, 1080),
     ph = rng.uniform(0, 2 * np.pi, 12)
 
     cmd = ["ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(media.FPS),
-           "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), "-g", str(media.FPS * 2),
+           "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", str(LOOP_CRF), *LOOP_MAXRATE, "-g", str(media.FPS * 2),
            "-pix_fmt", "yuv420p", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:

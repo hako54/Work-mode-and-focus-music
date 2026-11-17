@@ -64,6 +64,7 @@ Bota video/fotoğraf gönder (en fazla 20 MB)
 /video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
 /arkaplan · /arkaplan sil &lt;ad&gt; · /arkaplan yenile [1.25] – yeniden işle + önizleme
 /youtube – YouTube bağlantısı düştüyse yeniden bağla
+/hepsiniyukle – onay bekleyen tüm videoları yükle (cevap verilmezse 6 saat sonra kendiliğinden yüklenir)
 /atessesi – kullanılan ateş sesini dinlet · /atessesi ara – gerçek kayıtları dinle, seç · /atessesi sifirla
    Kendi ateş sesinizi kullanmak için bota ses dosyası gönderin (en az 15 sn)
 
@@ -118,7 +119,7 @@ class Bot:
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
             "video": self.cmd_video_link, "yogun": self.cmd_boost,
-            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube,
+            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube, "hepsiniyukle": self.cmd_upload_all,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -420,7 +421,9 @@ class Bot:
         except Exception as e:  # noqa: BLE001
             log.exception("Yükleme hatası")
             if youtube.is_expired_error(e):
-                await self.notify(f"⚠️ #{vid} yüklenemedi: {self.YT_EXPIRED}")
+                if self.db.get_setting("warned_yt_expired") != "1":  # aynı uyarıyı her video için tekrarlama
+                    self.db.set_setting("warned_yt_expired", "1")
+                    await self.notify(f"⚠️ #{vid} yüklenemedi: {self.YT_EXPIRED}")
                 return
             await self.notify(f"⚠️ #{vid} yüklenemedi, onay bekliyor olarak kaldı:\n"
                               f"<code>{html.escape(str(e)[:800])}</code>\nTekrar denemek için /onayla {vid}")
@@ -621,7 +624,7 @@ class Bot:
             f"<b>Durum</b>: {'⏸ DURAKLATILDI' if self.paused() else '▶️ çalışıyor'}"
             f"{' · DRY_RUN' if CONFIG.dry_run else ''}\n"
             f"Meşgul: {'evet' if self.busy.locked() else 'hayır'} · {due}\n"
-            f"💾 Disk: {self.pipe.free_bytes() / 1e9:.1f} GB boş\n\n"
+            f"💾 Disk (GB): {self.pipe.disk_report()}\n\n"
             f"<b>Sıradaki işler</b>\n{nxt}\n\n<b>Son videolar</b>\n{lines or '-'}")
 
     async def cmd_generate(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -894,6 +897,25 @@ class Bot:
         finally:
             tmp.unlink(missing_ok=True)
 
+    async def upload_all_pending(self) -> None:
+        """Onay bekleyen tüm videoları sırayla yükle (her biri sıradaki boş yayın saatine zamanlanır)."""
+        pend = [r for r in self.db.pending() if r["kind"] != "short"]
+        if not pend:
+            return
+        await self.notify(f"⬆️ Bekleyen {len(pend)} video sırayla yükleniyor; her biri sıradaki yayın saatine "
+                          "zamanlanacak.")
+        for r in pend:
+            await self.do_approve(r["id"])
+            if self.db.get_setting("warned_yt_expired") == "1":
+                break
+
+    async def cmd_upload_all(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/hepsiniyukle: onay bekleyen tüm videoları yükle."""
+        if self.db.get_setting("warned_yt_expired") == "1":
+            await update.message.reply_html("⚠️ " + self.YT_EXPIRED)
+            return
+        await self.upload_all_pending()
+
     YT_EXPIRED = ("<b>YouTube bağlantısının süresi doldu</b> (Google izni geçersiz). Videolar silinmedi, onay "
                   "bekliyor. Yeniden bağlamak için /youtube yazın (2 dk, bilgisayar gerekmez).")
 
@@ -920,10 +942,9 @@ class Bot:
             await asyncio.to_thread(youtube.exchange_code, " ".join(args), redirect)
             ch = await asyncio.to_thread(lambda: youtube.YouTube().channel())
             self.db.set_setting("warned_yt_expired", "0")
-            pend = self.db.query("SELECT id FROM videos WHERE status = 'pending' AND kind != 'short'")
             await update.message.reply_html(
-                f"✅ YouTube yeniden bağlandı: <b>{html.escape(str(ch.get('title', ch)))}</b>\n" +
-                (f"Onay bekleyenler: {', '.join('#' + str(r['id']) for r in pend)} — /bekleyenler" if pend else ""))
+                f"✅ YouTube yeniden bağlandı: <b>{html.escape(str(ch.get('title', ch)))}</b>")
+            await self.upload_all_pending()
         except Exception as e:  # noqa: BLE001
             log.warning("YouTube yeniden bağlanamadı: %s", e)
             await update.message.reply_text(f"⚠️ Bağlanamadı: {str(e)[:400]}\nLinki yeniden almak için /youtube")
@@ -1217,7 +1238,9 @@ class Bot:
 
     async def job_stats(self, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         try:
-            await asyncio.to_thread(self.pipe.refresh_stats)
+            n = await asyncio.to_thread(self.pipe.refresh_stats)
+            if n and self.db.get_setting("warned_yt_expired") == "1":   # bağlantı başka yoldan düzeldi
+                self.db.set_setting("warned_yt_expired", "0")
         except Exception as e:  # noqa: BLE001
             log.warning("İstatistik güncellenemedi: %s", e)
             if youtube.is_expired_error(e) and self.db.get_setting("warned_yt_expired") != "1":
@@ -1236,9 +1259,10 @@ class Bot:
         now = utcnow()
         remind_h = self.db.get_int("reminder_hours")
         auto_h = self.db.get_int("auto_approve_hours")
+        yt_down = self.db.get_setting("warned_yt_expired") == "1"   # bağlantı yokken otomatik yükleme denenmez
         for r in self.db.pending():
             age = now - parse_iso(r["created_at"])
-            if auto_h > 0 and age >= timedelta(hours=auto_h) and not self.busy.locked():
+            if auto_h > 0 and not yt_down and age >= timedelta(hours=auto_h) and not self.busy.locked():
                 await self.notify(f"⏱ #{r['id']} {auto_h} saattir cevapsız; ayar gereği otomatik onaylanıyor.")
                 await self.do_approve(r["id"])
                 continue

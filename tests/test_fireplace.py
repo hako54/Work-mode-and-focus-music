@@ -309,3 +309,21 @@ def test_uploaded_fire_sound_wins_and_resets(tmp_path):
     assert fireplace.ambience_bed() == out and "yüklediğin" in fireplace.fire_sound_source()
     fireplace.reset_fire_sound()
     assert fireplace.ambience_bed() != out
+
+
+def test_loops_are_bitrate_capped_for_long_videos(tmp_path):
+    src = tmp_path / "noisy.mp4"   # çok detaylı (gürültülü) kaynak: sınırsız CRF'de çok yüksek bit hızı verir
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "nullsrc=s=1920x1080:r=30:d=8", "-vf", "noise=alls=60:allf=t",
+                    "-c:v", "libx264", "-crf", "10", "-pix_fmt", "yuv420p", str(src)], check=True, capture_output=True)
+    bg = fireplace.Background("video", src)
+    loop = fireplace.loop_for(bg, (1920, 1080))
+    kbps = loop.stat().st_size * 8 / media.duration(loop) / 1000
+    assert kbps < 2600, kbps
+    assert "cap2000" not in loop.name and fireplace.loop_for(bg, (1920, 1080)) == loop   # önbellekten
+
+
+def test_disk_report(tmp_path):
+    from app.db import Database
+    from app.pipeline import Pipeline
+    rep = Pipeline(Database(tmp_path / "d.db")).disk_report()
+    assert "videolar" in rep and "boş" in rep

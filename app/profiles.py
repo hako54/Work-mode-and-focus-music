@@ -182,6 +182,7 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
         "thumb_style": "people",      # kapak: people (temaya uygun çift/kadın fotoğrafı) | scene (videodan kare)
         "scene_loop": "auto",         # tek sahne döngüsü: auto | pingpong (ileri-geri) | sequence (çoklu çekim) | loop
+        "auto_approve_hours": "6",    # 6 saat içinde cevap verilmezse video otomatik yüklenir (sıradaki yayın saatine)
         "cinematic": "0",             # 1: sahnelere sıcak ton + parçacık (kıvılcım/kar/toz); kamera hareketi yok
         "own_video_themes": "fireplace,autumn,winter,candlelight",
         "own_video_min_rating": "4",  # sonbahar/kış/mum temalarında 4-5⭐ kendi videoların önce (şömine: hepsi)
