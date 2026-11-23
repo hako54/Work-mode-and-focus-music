@@ -30,8 +30,28 @@ def _client() -> anthropic.Anthropic | None:
     return anthropic.Anthropic(api_key=CONFIG.anthropic_api_key) if CONFIG.anthropic_api_key else None
 
 
+FOCUS_HOOKS = ("Work Mode On", "Deep Focus", "Concentration Music", "Deep Thinking", "Focus Mode",
+               "Deep Work Session", "Study & Focus")
+FOCUS_HASHTAGS = "#FocusMusic #WorkMode #DeepFocus #ConcentrationMusic #StudyMusic"
+FOCUS_TAGS = ["focus music", "work mode", "deep focus", "concentration music", "deep work", "study music",
+              "music for concentration", "deep thinking"]
+FOCUS_BULLETS = ("Deep work & concentration", "Studying & exam prep", "Coding & writing", "Reading & deep thinking",
+                 "Work-from-home focus", "Creative flow sessions")
+
+
+def _focus_hint(duration_sec: float) -> str:
+    return (
+        "\nFOCUS ANGLE (required for this long video): the title must lead with a focus/productivity hook such as "
+        f"{', '.join(repr(h) for h in FOCUS_HOOKS)}, then the genre phrase and the length "
+        f"({fmt_long(duration_sec)}), e.g. 'Work Mode On ☕ 2 Hours Cozy Jazz for Deep Focus & Concentration | "
+        "Fireplace Ambience'. Vary the hook between videos. The 'Perfect for' list must start with deep work, "
+        "studying, concentration, coding/writing and deep thinking. Thumbnail text: a 2-word focus phrase like "
+        "'DEEP FOCUS' or 'WORK MODE'. Add tags for focus music, work mode, deep focus, concentration, study music.\n")
+
+
 def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_titles: list[str],
-             extra: str = "", theme_label: str = "", theme_key: str = "", series_key: str = "") -> VideoMeta:
+             extra: str = "", theme_label: str = "", theme_key: str = "", series_key: str = "",
+             focus: bool = False) -> VideoMeta:
     client = _client()
     if client:
         minutes = round(duration_sec / 60)
@@ -44,7 +64,8 @@ def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_ti
             f"Channel: {profiles.channel_name()}\n"
             + (_series_hint(series_key) if series_key else "") +
             f"Recent titles to avoid repeating:\n" + "\n".join(f"- {t}" for t in recent_titles[:15]) +
-            (f"\n\nExtra context: {extra}" if extra else "")
+            (f"\n\nExtra context: {extra}" if extra else "") +
+            (_focus_hint(duration_sec) if focus else "")
         )
         try:
             resp = client.messages.parse(
@@ -56,12 +77,45 @@ def generate(kind: str, style: Style, duration_sec: float, scene: str, recent_ti
                 output_format=VideoMeta,
             )
             if resp.stop_reason != "refusal" and resp.parsed_output:
-                return _clean(resp.parsed_output)
+                meta = _clean(resp.parsed_output)
+                return _ensure_focus(meta, duration_sec) if focus else meta
             log.warning("Claude meta üretmedi (stop_reason=%s), şablona geçiliyor", resp.stop_reason)
         except anthropic.APIError as e:
             log.warning("Claude API hatası: %s — şablona geçiliyor", e)
-    return fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label, theme_key=theme_key,
+    meta = fallback(kind, style, duration_sec, scene=scene, theme_label=theme_label, theme_key=theme_key,
                     series_key=series_key)
+    return _focus_fallback(meta, duration_sec, series_key) if focus else meta
+
+
+def _ensure_focus(meta: VideoMeta, duration_sec: float) -> VideoMeta:
+    """Claude odak ifadesini unuttuysa başa ekle; odak etiketlerini tamamla."""
+    low = meta.title.lower()
+    title = meta.title
+    if not any(w in low for w in ("focus", "work mode", "concentration", "deep thinking", "deep work", "study")):
+        title = shorten(f"{random.choice(FOCUS_HOOKS[:2])} • {title}", 100)
+    tags = list(dict.fromkeys([*meta.tags, *FOCUS_TAGS[:4]]))
+    return _clean(meta.model_copy(update={"title": title, "tags": tags}))
+
+
+def _focus_fallback(meta: VideoMeta, duration_sec: float, series_key: str) -> VideoMeta:
+    from . import series as series_mod
+    rng = random.Random()
+    ser = series_mod.get(series_key)
+    hook = rng.choice(FOCUS_HOOKS)
+    head, _, ambience = meta.title.partition(" | ")
+    ambience = ambience or f"{fmt_long(duration_sec)} {ser.label} Ambience"   # süre zaten burada
+    place = head.split(ser.genre, 1)[1].strip() if ser.genre in head else ""  # ör. "by the Fire"
+    title = " ".join(f"{hook} 🎧 {ser.genre} {place}".split()) + f" | {ambience}"
+    if len(title) > 100:   # sığmazsa mekânı çıkar, yine de kelime ortasından kesme
+        title = f"{hook} 🎧 {ser.genre} | {ambience}"
+    title = shorten(title, 100)
+    bullets = "\n".join(f"• {b}" for b in (*FOCUS_BULLETS, *rng.sample(ser.perfect_for, 3)))
+    desc = (f"{fmt_long(duration_sec)} of soft {ser.genre.lower()} to switch your brain into work mode — calm, "
+            "steady and free of distractions, so you can think deeply and stay in flow.\n\n"
+            f"✨ Perfect for:\n{bullets}\n\nPut it on, start your session and let the music keep you focused. 🎧")
+    tags = list(dict.fromkeys([*FOCUS_TAGS, *meta.tags]))
+    return meta.model_copy(update={"title": title, "description": desc, "tags": tags,
+                                   "thumbnail_text": rng.choice(["DEEP FOCUS", "WORK MODE", "FOCUS MODE"])})
 
 
 def fallback(kind: str, style: Style, duration_sec: float, rng: random.Random | None = None,

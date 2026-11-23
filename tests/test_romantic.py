@@ -862,3 +862,23 @@ def test_oauth_web_page(pipe, monkeypatch):
     assert ok.startswith("HTTP/1.1 200") and "bağlandı" in ok and got == [("4/xyz", "web")]
     assert pipe.db.get_setting("oauth_state") == ""                 # link bir kez kullanılır
     assert "çalışıyor" in home
+
+
+def test_long_videos_get_focus_titles_except_sleep(pipe):
+    from app import metadata
+    from app.series import SERIES_BY_KEY
+    assert pipe.long_focus("jazz") and pipe.long_focus("romance") and not pipe.long_focus("sleep")
+    m = metadata.generate("compilation", ROMANTIC_STYLES[0], 2 * 3600, "fireplace", [], series_key="jazz",
+                          focus=True)
+    assert any(h in m.title for h in metadata.FOCUS_HOOKS) and "2 Hour" in m.title and len(m.title) <= 100
+    assert m.title.count("2 Hour") == 1
+    assert "Deep work" in m.description and "work mode" in m.tags
+    assert m.thumbnail_text in ("DEEP FOCUS", "WORK MODE", "FOCUS MODE")
+    plain = metadata.generate("compilation", ROMANTIC_STYLES[0], 2 * 3600, "fireplace", [], series_key="sleep")
+    assert not any(h in plain.title for h in metadata.FOCUS_HOOKS)
+    fixed = metadata._ensure_focus(metadata.VideoMeta(title="Soft Rain Jazz | Cafe Ambience", description="d",
+                                                      tags=["jazz"], thumbnail_text="X", track_name="t"), 3600)
+    assert any(h in fixed.title for h in metadata.FOCUS_HOOKS) and "deep focus" in fixed.tags
+    assert validate_setting("long_focus_series", "jazz,relax") is None
+    assert validate_setting("long_focus_series", "jazz,uzay")
+    assert SERIES_BY_KEY["sleep"]

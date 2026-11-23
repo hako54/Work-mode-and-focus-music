@@ -46,6 +46,8 @@ SETTING_HELP: dict[str, str] = {
     "thumb_style": "Kapak: people (çift/kadın fotoğrafı, 3 aday) | scene (videodan kare)",
     "scene_loop": "Tek sahne döngüsü: auto (göl/gece gibi sahnelerde ileri-geri, yağmur/kar/şöminede aynı mekândan "
                   "2-3 çekim) | pingpong | sequence | loop",
+    "long_focus_titles": "Uzun videolarda odak başlıkları: Work Mode On, Deep Focus, Concentration (1/0)",
+    "long_focus_series": "Odak başlığı alacak seriler (virgülle; romance,jazz,relax,sleep)",
     "cinematic": "Sahnelere sinematik işleme: sıcak ton, vinyet, gren, parçacıklar (1/0; kamera hareketi yok)",
     "own_video_themes": "Bu temalarda kendi 4-5⭐ videoların öncelikli (virgülle; boş = hiçbiri)",
     "own_video_min_rating": "Kendi videonun öncelikli kullanılması için en az puan (1-5)",
@@ -182,6 +184,8 @@ songs or copyrighted works. Do not add hashtags; they are appended separately.""
         "publish_roll": "1",          # 08:00 geçtiyse ertesi sabah 08:00'e zamanla
         "thumb_style": "people",      # kapak: people (temaya uygun çift/kadın fotoğrafı) | scene (videodan kare)
         "scene_loop": "auto",         # tek sahne döngüsü: auto | pingpong (ileri-geri) | sequence (çoklu çekim) | loop
+        "long_focus_titles": "1",     # uzun videolar: Work Mode On / Deep Focus / Concentration başlıkları
+        "long_focus_series": "romance,jazz,relax",   # uyku serisi hariç (uyku müziğine 'work mode' yanıltıcı olur)
         "auto_approve_hours": "6",    # 6 saat içinde cevap verilmezse video otomatik yüklenir (sıradaki yayın saatine)
         "cinematic": "0",             # 1: sahnelere sıcak ton + parçacık (kıvılcım/kar/toz); kamera hareketi yok
         "own_video_themes": "fireplace,autumn,winter,candlelight",

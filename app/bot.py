@@ -1393,6 +1393,10 @@ def validate_setting(key: str, value: str) -> str | None:
         from .themes import THEME_BY_KEY as _TB
         bad = [x for x in value.replace(" ", "").split(",") if x and x not in _TB]
         return f"bilinmeyen tema: {', '.join(bad)} (/temalar)" if bad else None
+    if key == "long_focus_series":
+        from .series import SERIES_BY_KEY as _SB
+        bad = [x for x in value.replace(" ", "").split(",") if x and x not in _SB]
+        return f"bilinmeyen seri: {', '.join(bad)} (romance, jazz, sleep, relax)" if bad else None
     if key == "own_video_min_rating":
         return None if value in ("1", "2", "3", "4", "5") else "1-5 arası olmalı"
     if key == "daily_visual":
@@ -1408,7 +1412,7 @@ def validate_setting(key: str, value: str) -> str | None:
     if not value.isdigit():
         return "pozitif tam sayı olmalı"
     n = int(value)
-    if key in ("make_shorts", "paused", "cinematic", "scene_people") and n not in (0, 1):
+    if key in ("make_shorts", "paused", "cinematic", "scene_people", "long_focus_titles") and n not in (0, 1):
         return "0 veya 1 olmalı"
     if key in ("daily_min_sec", "daily_max_sec") and not 60 <= n <= 600:
         return "60–600 sn arası olmalı"

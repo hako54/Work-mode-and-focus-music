@@ -1035,15 +1035,26 @@ class Pipeline:
             scene = "a cozy wood fireplace burning at night, warm flickering flames and glowing embers"
             if self.db.get_setting("fire_volume") not in ("", "0"):
                 extra += " Soft crackling fireplace sounds play gently under the music."
+        focus = self.long_focus(ser.key if ser else None)
         meta = metadata.generate(kind, style, total, scene, self.recent_titles(), extra=extra,
-                                 series_key=ser.key if ser else "")
-        desc = metadata.full_description(meta.description, tracklist, hashtags=ser.hashtags if ser else "")
+                                 series_key=ser.key if ser else "", focus=focus)
+        tags_line = ser.hashtags if ser else ""
+        if focus:
+            tags_line = (metadata.FOCUS_HASHTAGS + " " + tags_line).strip()
+        desc = metadata.full_description(meta.description, tracklist, hashtags=tags_line)
         self.db.update_video(video_id, title=meta.title, description=desc, tags=meta.tags,
                              thumbnail_text=meta.thumbnail_text)
         self._refresh_short_text(video_id)
         v = self.db.video(video_id)
         if v["video_path"]:  # yalnızca metin değiştiyse küçük resmi güncelle
             self._compilation_thumb(video_id)
+
+    def long_focus(self, series_key: str | None) -> bool:
+        """Uzun videoya odak/çalışma başlığı (Work Mode On, Deep Focus…) verilsin mi (uyku serisi hariç)."""
+        if self.db.get_setting("long_focus_titles") != "1":
+            return False
+        allowed = {x.strip() for x in (self.db.get_setting("long_focus_series") or "").split(",") if x.strip()}
+        return not series_key or series_key in allowed
 
     def _compilation_thumb(self, video_id: int) -> Path:
         v = self.db.video(video_id)
