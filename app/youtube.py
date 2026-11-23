@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -24,6 +26,28 @@ MUSIC_CATEGORY = "10"
 REDIRECTS = {"localhost": "http://localhost", "playground": "https://developers.google.com/oauthplayground"}
 
 
+def web_redirect() -> str | None:
+    """Railway alan adı varsa tek dokunuşla bağlanma adresi (Google Cloud'a bir kez eklenir)."""
+    domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    return f"https://{domain}/oauth" if domain else None
+
+
+def redirect_uri(kind: str) -> str:
+    if kind == "web":
+        return web_redirect() or REDIRECTS["localhost"]
+    return REDIRECTS[kind]
+
+
+def clean_token(raw: str) -> str:
+    """Kopyala-yapıştır hatalarını temizle: boşluk/satır sonu, tırnak, 'YOUTUBE_REFRESH_TOKEN=' ya da JSON parçası."""
+    t = (raw or "").strip()
+    m = re.search(r"1//[0-9A-Za-z_\-]{20,}", t)   # Google refresh token'ları '1//' ile başlar
+    if m:
+        return m.group(0)
+    t = re.sub(r"^\s*(YOUTUBE_REFRESH_TOKEN|refresh_token)\s*[=:]\s*", "", t, flags=re.I)
+    return t.strip().strip('"').strip("'").strip().rstrip(",").strip('"')
+
+
 def token_file() -> Path:
     return CONFIG.data_dir / "youtube_refresh_token.txt"
 
@@ -32,18 +56,48 @@ def refresh_token() -> str:
     """Telegram'dan (/youtube) yenilenen token varsa o, yoksa Railway'deki YOUTUBE_REFRESH_TOKEN."""
     f = token_file()
     if f.exists() and f.read_text().strip():
-        return f.read_text().strip()
-    return CONFIG.youtube_refresh_token
+        return clean_token(f.read_text())
+    return clean_token(CONFIG.youtube_refresh_token)
+
+
+def token_info() -> str:
+    """Token'ın kendisini göstermeden durumu (Telegram'da teşhis için)."""
+    f = token_file()
+    src, raw = (("bottan bağlanan", f.read_text()) if f.exists() and f.read_text().strip()
+                else ("Railway YOUTUBE_REFRESH_TOKEN", CONFIG.youtube_refresh_token or ""))
+    tok = clean_token(raw)
+    notes = []
+    if not tok:
+        notes.append("boş")
+    if tok and not tok.startswith("1//"):
+        notes.append("'1//' ile başlamıyor (refresh token değil, büyük ihtimalle kod/erişim anahtarı)")
+    if raw.strip() != tok and tok:
+        notes.append("fazladan karakterler temizlendi")
+    return f"{src}, {len(tok)} karakter" + (f" — {'; '.join(notes)}" if notes else "")
+
+
+def check_token() -> str | None:
+    """None = çalışıyor; aksi halde Google'ın hata mesajı."""
+    from google.auth.transport.requests import Request
+    try:
+        Credentials(None, refresh_token=refresh_token(), token_uri="https://oauth2.googleapis.com/token",
+                    client_id=CONFIG.youtube_client_id, client_secret=CONFIG.youtube_client_secret,
+                    scopes=SCOPES).refresh(Request())
+        return None
+    except Exception as e:  # noqa: BLE001
+        return str(e)[:300]
 
 
 def is_expired_error(e: Exception) -> bool:
     return "invalid_grant" in str(e)
 
 
-def auth_url(redirect: str = "localhost") -> str:
-    return "https://accounts.google.com/o/oauth2/auth?" + urlencode({
-        "client_id": CONFIG.youtube_client_id, "redirect_uri": REDIRECTS[redirect], "response_type": "code",
-        "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "consent"})
+def auth_url(redirect: str = "localhost", state: str = "") -> str:
+    params = {"client_id": CONFIG.youtube_client_id, "redirect_uri": redirect_uri(redirect), "response_type": "code",
+              "scope": " ".join(SCOPES), "access_type": "offline", "prompt": "consent"}
+    if state:
+        params["state"] = state
+    return "https://accounts.google.com/o/oauth2/auth?" + urlencode(params)
 
 
 def exchange_code(text: str, redirect: str = "localhost") -> str:
@@ -52,7 +106,7 @@ def exchange_code(text: str, redirect: str = "localhost") -> str:
     code = parse_qs(urlparse(text).query).get("code", [text])[0] if "code=" in text else text
     r = requests.post("https://oauth2.googleapis.com/token", timeout=30, data={
         "code": code, "client_id": CONFIG.youtube_client_id, "client_secret": CONFIG.youtube_client_secret,
-        "redirect_uri": REDIRECTS[redirect], "grant_type": "authorization_code"})
+        "redirect_uri": redirect_uri(redirect), "grant_type": "authorization_code"})
     data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     if r.status_code != 200 or not data.get("refresh_token"):
         raise YouTubeError(f"Google kodu kabul etmedi: {data.get('error_description') or data.get('error') or r.text[:200]}")

@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import html
+import os
+import re
+import secrets
+from urllib.parse import parse_qs, urlparse
 import shutil
 import logging
 from datetime import datetime, time, timedelta
@@ -168,6 +172,7 @@ class Bot:
         self.loop = asyncio.get_running_loop()
         self._recover()
         self.schedule_jobs()
+        await self._start_web()
         await self.notify(f"🤖 Bot başladı ({profiles.current().key} · {html.escape(profiles.channel_name())}). " + ("(DRY_RUN: YouTube'a yükleme yapılmayacak)" if CONFIG.dry_run else "")
                           + "\n/yardim ile komutları görebilirsiniz.")
 
@@ -208,6 +213,12 @@ class Bot:
             try:
                 await self.app.bot.send_message(uid, text, parse_mode=ParseMode.HTML, **kw)
             except Exception as e:  # noqa: BLE001
+                if "parse entities" in str(e):  # mesajda < > gibi karakter: biçimsiz olarak yine de gönder
+                    try:
+                        await self.app.bot.send_message(uid, re.sub(r"<[^>]{0,20}>", "", text), **kw)
+                        continue
+                    except Exception as e2:  # noqa: BLE001
+                        e = e2
                 log.warning("Telegram mesajı gönderilemedi (%s): %s", uid, e)
 
     def notify_threadsafe(self, text: str) -> None:
@@ -407,6 +418,12 @@ class Bot:
             await self.notify(f"⚠️ Derleme üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
 
     async def do_approve(self, vid: int, now: bool = False) -> None:
+        if self.db.get_setting("warned_yt_expired") == "1" and not CONFIG.dry_run:
+            problem = await asyncio.to_thread(youtube.check_token)
+            if problem is not None:
+                await self.notify(f"⏸ #{vid} bekliyor: {self.YT_EXPIRED}")
+                return
+            self.db.set_setting("warned_yt_expired", "0")
         try:
             def work(video_id, progress):
                 return self.pipe.approve(video_id, progress, publish_now=now)
@@ -916,38 +933,96 @@ class Bot:
             return
         await self.upload_all_pending()
 
-    YT_EXPIRED = ("<b>YouTube bağlantısının süresi doldu</b> (Google izni geçersiz). Videolar silinmedi, onay "
-                  "bekliyor. Yeniden bağlamak için /youtube yazın (2 dk, bilgisayar gerekmez).")
+    YT_EXPIRED = ("<b>YouTube bağlantısı çalışmıyor</b> (Google izni geçersiz). Videolar silinmedi; bağlantı "
+                  "kurulunca kendiliğinden yüklenecek. /youtube yazıp linke dokunun.")
 
     async def cmd_youtube(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        """/youtube: yeniden bağlanma linki · /youtube <yönlendirilen adres ya da kod>: bağlantıyı kaydet."""
+        """/youtube: durum + bağlanma linki · /youtube <yönlendirilen adres ya da kod>: elle bağlantı (yedek yol)."""
         args = ctx.args or []
-        redirect = "playground" if args and args[0].lower() == "playground" else "localhost"
+        kind = "playground" if args and args[0].lower() == "playground" else (
+            "web" if youtube.web_redirect() else "localhost")
         if args and args[0].lower() == "playground":
             args = args[1:]
-        if not args:
-            url = youtube.auth_url(redirect)
-            await update.message.reply_html(
-                "🔗 <b>YouTube'u yeniden bağla</b>\n"
-                f"1) Bu linki açın: <a href=\"{html.escape(url)}\">Google ile giriş</a>\n"
-                "2) Kanalın sahibi hesabı (ve Evermore Romance Piano kanalını) seçin, izin verin. "
-                "\"Google bu uygulamayı doğrulamadı\" çıkarsa <i>Gelişmiş → devam et</i>.\n"
-                "3) Sonunda açılmayan bir sayfa (localhost) gelir; <b>adres çubuğundaki tüm adresi</b> kopyalayıp "
-                "buraya şöyle yazın:\n<code>/youtube http://localhost/?code=...</code>\n\n"
-                "ℹ️ Google 'redirect_uri_mismatch' derse: <code>/youtube playground</code> deneyin.\n"
-                "⚠️ Kalıcı olması için Google Cloud → OAuth consent screen → <b>Publishing status: In production</b> "
-                "olmalı; <i>Testing</i>'de bağlantı 7 günde bir düşer.")
+        if args:
+            await self._finish_youtube_connect(" ".join(args), "localhost" if kind == "web" else kind, update)
             return
+        problem = await asyncio.to_thread(youtube.check_token)
+        status = ("✅ Şu anki bağlantı çalışıyor." if problem is None else
+                  f"❌ Şu anki bağlantı çalışmıyor: <code>{html.escape(problem[:160])}</code>")
+        state = secrets.token_urlsafe(16)
+        self.db.set_setting("oauth_state", state)
+        url = youtube.auth_url(kind, state)
+        steps = ("2) Kanal hesabını (Evermore Romance Piano) seçin, izin verin. \"Google bu uygulamayı doğrulamadı\" "
+                 "çıkarsa <i>Advanced → Go to … → Continue</i>.\n")
+        if kind == "web":
+            steps += ("3) Bitti! \"✅ Bağlandı\" sayfası açılır, bot bekleyen videoları kendisi yükler.\n\n"
+                      f"ℹ️ Google <b>redirect_uri_mismatch</b> derse: Google Cloud → Clients → istemciniz → "
+                      f"Authorized redirect URIs → <b>+ Add URI</b> → <code>{html.escape(youtube.web_redirect())}</code>"
+                      " → Save, 5 dk bekleyip /youtube tekrar.")
+        else:
+            steps += ("3) Sonunda açılmayan bir sayfa (localhost) gelir; <b>adres çubuğundaki tüm adresi</b> kopyalayıp "
+                      "buraya yazın: <code>/youtube http://localhost/?code=...</code>")
+        await update.message.reply_html(
+            f"🔗 <b>YouTube bağlantısı</b>\n{status}\nKullanılan: {html.escape(youtube.token_info())}\n\n"
+            f"1) <a href=\"{html.escape(url)}\">Google ile giriş</a> linkini açın.\n{steps}",
+            disable_web_page_preview=True)
+
+    async def _finish_youtube_connect(self, code_text: str, kind: str, update: Update | None = None) -> bool:
+        async def say(text: str) -> None:
+            if update:
+                await update.message.reply_html(text)
+            else:
+                await self.notify(text)
         try:
-            await asyncio.to_thread(youtube.exchange_code, " ".join(args), redirect)
+            await asyncio.to_thread(youtube.exchange_code, code_text, kind)
             ch = await asyncio.to_thread(lambda: youtube.YouTube().channel())
-            self.db.set_setting("warned_yt_expired", "0")
-            await update.message.reply_html(
-                f"✅ YouTube yeniden bağlandı: <b>{html.escape(str(ch.get('title', ch)))}</b>")
-            await self.upload_all_pending()
         except Exception as e:  # noqa: BLE001
             log.warning("YouTube yeniden bağlanamadı: %s", e)
-            await update.message.reply_text(f"⚠️ Bağlanamadı: {str(e)[:400]}\nLinki yeniden almak için /youtube")
+            await say(f"⚠️ Bağlanamadı: {html.escape(str(e)[:400])}\nLinki yeniden almak için /youtube")
+            return False
+        self.db.set_setting("warned_yt_expired", "0")
+        await say(f"✅ YouTube yeniden bağlandı: <b>{html.escape(str(ch.get('title', ch)))}</b>")
+        asyncio.create_task(self.upload_all_pending())
+        return True
+
+    async def _start_web(self) -> None:
+        """Google'ın geri döndüğü küçük sayfa (/oauth): kopyala-yapıştır gerekmeden YouTube bağlantısı."""
+        port = int(os.environ.get("PORT", "8080"))
+
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            try:
+                line = (await asyncio.wait_for(reader.readline(), 10)).decode(errors="replace")
+                while (await asyncio.wait_for(reader.readline(), 10)) not in (b"\r\n", b"\n", b""):
+                    pass
+                path = line.split(" ")[1] if line.count(" ") >= 2 else "/"
+                q = parse_qs(urlparse(path).query)
+                if path.startswith("/oauth"):
+                    if q.get("state", [""])[0] != (self.db.get_setting("oauth_state") or "-"):
+                        body, code = "Bu bağlantı linki eski. Telegram'da /youtube yazıp yeni linki kullanın.", 400
+                    elif "code" not in q:
+                        body, code = f"Google izin vermedi: {html.escape(q.get('error', ['?'])[0])}", 400
+                    else:
+                        self.db.set_setting("oauth_state", "")
+                        ok = await self._finish_youtube_connect(q["code"][0], "web")
+                        body, code = (("✅ YouTube bağlandı! Telegram'a dönebilirsiniz; bekleyen videolar yükleniyor.", 200)
+                                      if ok else ("⚠️ Bağlanamadı, ayrıntı Telegram'da.", 500))
+                else:
+                    body, code = "Evermore Romance Bot çalışıyor.", 200
+                page = (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+                        f"<body style='font-family:sans-serif;padding:32px;font-size:20px'>{body}</body>").encode()
+                writer.write(f"HTTP/1.1 {code} OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                             f"Content-Length: {len(page)}\r\nConnection: close\r\n\r\n".encode() + page)
+                await writer.drain()
+            except Exception as e:  # noqa: BLE001
+                log.warning("Web isteği işlenemedi: %s", e)
+            finally:
+                writer.close()
+
+        try:
+            self._web = await asyncio.start_server(handle, "0.0.0.0", port)
+            log.info("OAuth sayfası %s portunda (%s)", port, youtube.web_redirect() or "alan adı yok")
+        except OSError as e:
+            log.warning("Web sunucusu açılamadı: %s", e)
 
     async def cmd_fire_sound(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """/atessesi: şu anki ateş sesini dinlet · /atessesi ara: gerçek kayıt adaylarını dinle, seç ·
@@ -1267,7 +1342,7 @@ class Bot:
                 await self.do_approve(r["id"])
                 continue
             last = parse_iso(r["last_reminder_at"]) or parse_iso(r["created_at"])
-            if remind_h > 0 and now - last >= timedelta(hours=remind_h):
+            if remind_h > 0 and not yt_down and now - last >= timedelta(hours=remind_h):
                 self.db.update_video(r["id"], last_reminder_at=now.isoformat(timespec="seconds"))
                 await self.app.bot.send_message(
                     next(iter(CONFIG.admin_ids)),

@@ -808,3 +808,57 @@ def test_youtube_reconnect_from_telegram(monkeypatch):
 def test_compilation_size_measured_from_real_loops(pipe):
     rate = pipe._measured_bytes_per_sec()        # testte paketteki şömine fotoğrafının döngüsü ölçülür
     assert rate > pipe.AUDIO_BYTES_PER_SEC
+
+
+def test_youtube_token_cleanup_and_web_redirect(monkeypatch, tmp_path):
+    import dataclasses
+    from app import youtube
+    youtube.token_file().unlink(missing_ok=True)
+    monkeypatch.setattr(youtube, "CONFIG", dataclasses.replace(
+        youtube.CONFIG, youtube_client_id="cid", youtube_client_secret="s",
+        youtube_refresh_token=' YOUTUBE_REFRESH_TOKEN="1//0gAbcdefghijklmnopqrstuvwxyz"\n'))
+    assert youtube.refresh_token() == "1//0gAbcdefghijklmnopqrstuvwxyz"   # kopyala-yapıştır hatası temizlenir
+    assert "temizlendi" in youtube.token_info()
+    monkeypatch.setattr(youtube, "CONFIG", dataclasses.replace(youtube.CONFIG, youtube_refresh_token="4/0Acode"))
+    assert "1//" in youtube.token_info()                                   # yanlış türde değer uyarısı
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
+    assert youtube.web_redirect() is None and "redirect_uri=http%3A%2F%2Flocalhost" in youtube.auth_url("web")
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "romance-bot.up.railway.app")
+    url = youtube.auth_url("web", "st8")
+    assert "romance-bot.up.railway.app%2Foauth" in url and "state=st8" in url
+
+
+def test_oauth_web_page(pipe, monkeypatch):
+    import asyncio
+    from app.bot import Bot
+    bot = Bot.__new__(Bot)
+    bot.db, bot.pipe = pipe.db, pipe
+    pipe.db.set_setting("oauth_state", "good")
+    got = []
+
+    async def fake_finish(code, kind, update=None):
+        got.append((code, kind))
+        return True
+    monkeypatch.setattr(bot, "_finish_youtube_connect", fake_finish)
+    monkeypatch.setenv("PORT", "18765")
+
+    async def run():
+        await bot._start_web()
+
+        async def get(path):
+            r, w = await asyncio.open_connection("127.0.0.1", 18765)
+            w.write(f"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+            await w.drain()
+            data = await r.read()
+            w.close()
+            return data.decode()
+        bad = await get("/oauth?code=abc&state=wrong")
+        ok = await get("/oauth?code=4/xyz&state=good")
+        home = await get("/")
+        bot._web.close()
+        return bad, ok, home
+    bad, ok, home = asyncio.run(run())
+    assert "400" in bad.split("\r\n")[0] and "eski" in bad
+    assert ok.startswith("HTTP/1.1 200") and "bağlandı" in ok and got == [("4/xyz", "web")]
+    assert pipe.db.get_setting("oauth_state") == ""                 # link bir kez kullanılır
+    assert "çalışıyor" in home

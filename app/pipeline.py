@@ -811,7 +811,8 @@ class Pipeline:
         total = sum(c["duration"] - x for c in chosen)
         self.housekeeping()
         self.COMP_BYTES_PER_SEC = self._measured_bytes_per_sec()
-        fit = (self.free_bytes() - self.SAFETY_BYTES) / self.COMP_BYTES_PER_SEC   # diske sığan en uzun süre
+        # diske sığan en uzun süre (parça sınırı hedefi biraz aşabildiği için %10 pay + güvenlik payı)
+        fit = (self.free_bytes() - 2 * self.SAFETY_BYTES) / self.COMP_BYTES_PER_SEC * 0.9
         if fit < 3600:
             self.ensure_space(self.compilation_bytes(3600), "en az 1 saatlik uzun video", progress)
         if fit < max_range:
@@ -852,6 +853,8 @@ class Pipeline:
                 total += t["duration_sec"] - x
             chosen = self._flow(chosen)
 
+        while total > max_range and len(chosen) > 1:   # diske sığmayan fazlalık parçalar çıkarılır
+            total -= chosen.pop()["duration"] - x
         styles = [c["style_key"] for c in chosen]
         main_style = STYLE_BY_KEY[max(set(styles), key=styles.count)]
         self.ensure_space(self.compilation_bytes(total), "uzun video", progress)
@@ -935,7 +938,7 @@ class Pipeline:
         for pattern in ("upload_*", "sound_*", "*.part.*", "*.tmp.*", "preview_*.mp3", "*.raw.*"):
             for f in cache.glob(pattern):
                 f.unlink(missing_ok=True)
-        week2 = time_mod.time() - 14 * 86400   # 14 gündür kullanılmayan (ör. eski ayarlı) arka plan döngüleri
+        week2 = time_mod.time() - 3 * 86400    # 3 gündür kullanılmayan (ör. eski ayarlı) arka plan döngüleri
         for f in list(cache.glob("loop_*.mp4")) + list(cache.glob("preview_loop_*.mp4")):
             if f.stat().st_mtime < week2:
                 f.unlink(missing_ok=True)
