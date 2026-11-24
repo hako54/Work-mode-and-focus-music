@@ -140,3 +140,37 @@ def test_compilation_due(pipe, db):
     old = iso(datetime.now(timezone.utc) - timedelta(days=16))
     db.update_video(vid, created_at=old)
     assert pipe.compilation_due()
+
+
+def test_upload_is_never_repeated_after_playlist_error(tmp_path, monkeypatch):
+    import dataclasses
+    import sys
+    import types
+    import app.pipeline as pl
+    from app.db import Database
+    db = Database(tmp_path / "u.db")
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: FakeMusic())
+    pipe = pl.Pipeline(db)
+    db.set_setting("make_shorts", "0")
+    vid = pipe.create_daily(STYLES[0].key)
+    uploads = []
+
+    class FakeYT:
+        def upload(self, path, title, desc, tags, when):
+            uploads.append(title)
+            return f"yt{len(uploads)}"
+        def set_thumbnail(self, yid, path):
+            raise RuntimeError("403 thumbnail")
+        def ensure_playlist(self, *a):
+            raise RuntimeError("429 RATE_LIMIT_EXCEEDED")
+        def add_to_playlist(self, *a):
+            pass
+    fake_mod = types.SimpleNamespace(YouTube=FakeYT)
+    monkeypatch.setitem(sys.modules, "app.youtube", fake_mod)
+    monkeypatch.setattr(pl, "CONFIG", dataclasses.replace(pl.CONFIG, dry_run=False))
+    ids = pipe.approve(vid)
+    assert ids == ["yt1"] and db.video(vid)["youtube_id"] == "yt1"
+    assert db.video(vid)["status"] in ("scheduled", "published")
+    with pytest.raises(ValueError):
+        pipe.approve(vid)                    # tekrar onay: yeniden YÜKLENMEZ
+    assert uploads == [db.video(vid)["title"]]

@@ -1377,7 +1377,10 @@ class Pipeline:
         from .youtube import YouTube  # Google kütüphanesi testlerde gerekmesin
 
         v = self.db.video(video_id)
-        children = [c for c in self.db.children(video_id) if c["status"] == "pending"]
+        children = [c for c in self.db.children(video_id) if c["status"] == "pending" and not c["youtube_id"]]
+        if v["status"] == "pending" and v["youtube_id"]:   # eski hatadan kalan: zaten YouTube'da
+            self.db.update_video(video_id, status="scheduled")
+            v = self.db.video(video_id)
         if v["status"] != "pending" and not children:
             raise ValueError(f"Video #{video_id} onay beklemiyor (durum: {v['status']})")
         items = []
@@ -1404,19 +1407,30 @@ class Pipeline:
                     else:
                         description = description.replace(": " + self.FULL_LINK_TOKEN, " on our channel")
                     self.db.update_video(row["id"], description=description)
-                if yt is None:
+                if row["youtube_id"]:   # daha önce yüklenmiş (sonraki adımda hata olmuş): ASLA tekrar yükleme
+                    yid = row["youtube_id"]
+                elif yt is None:
                     yid = f"dryrun-{row['id']}"
                 else:
                     yid = yt.upload(Path(row["video_path"]), row["title"], description, tags_of(row), when)
-                    if row["thumb_path"]:
-                        yt.set_thumbnail(yid, Path(row["thumb_path"]))
-                    self._add_to_playlists(yt, row, yid)
+                # yükleme bitti: kimliği hemen kaydet ki kapak/playlist hatası tekrar yüklemeye yol açmasın
                 self.db.update_video(row["id"], youtube_id=yid, status="scheduled" if when else "published",
                                      publish_at=iso(when or utcnow()), error=None)
+                if yt is not None:
+                    try:
+                        if row["thumb_path"]:
+                            yt.set_thumbnail(yid, Path(row["thumb_path"]))
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Kapak ayarlanamadı (%s): %s", yid, e)
+                    try:
+                        self._add_to_playlists(yt, row, yid)
+                    except Exception as e:  # noqa: BLE001 — ör. YouTube 429 hız sınırı: video yine de yüklendi
+                        log.warning("Playlist'e eklenemedi (%s): %s", yid, e)
                 ids.append(yid)
                 self._cleanup_after_upload(row)
             except Exception as e:
-                self.db.update_video(row["id"], status="pending", error=str(e)[:1000])
+                if not self.db.video(row["id"])["youtube_id"]:
+                    self.db.update_video(row["id"], status="pending", error=str(e)[:1000])
                 raise
         return ids
 
