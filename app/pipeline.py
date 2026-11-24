@@ -1411,6 +1411,9 @@ class Pipeline:
                     yid = row["youtube_id"]
                 elif yt is None:
                     yid = f"dryrun-{row['id']}"
+                elif (found := self._already_on_channel(yt, row["title"])):
+                    yid = found   # önceki denemede yüklenmiş ama kaydedilememiş: tekrar yükleme
+                    log.info("#%s zaten kanalda (%s), yeniden yüklenmedi", row["id"], yid)
                 else:
                     yid = yt.upload(Path(row["video_path"]), row["title"], description, tags_of(row), when)
                 # yükleme bitti: kimliği hemen kaydet ki kapak/playlist hatası tekrar yüklemeye yol açmasın
@@ -1433,6 +1436,40 @@ class Pipeline:
                     self.db.update_video(row["id"], status="pending", error=str(e)[:1000])
                 raise
         return ids
+
+    @staticmethod
+    def _already_on_channel(yt, title: str) -> str | None:
+        try:
+            return yt.find_uploaded(title)
+        except Exception as e:  # noqa: BLE001 — kontrol yapılamazsa normal yüklemeye devam
+            log.warning("Kanal yüklemeleri kontrol edilemedi: %s", e)
+            return None
+
+    def duplicate_uploads(self) -> list[dict]:
+        """Kanalda aynı başlıkla birden fazla yüklenmiş videolar: en eskisi kalır, fazlalar listelenir."""
+        from .youtube import YouTube
+        groups: dict[str, list[dict]] = {}
+        for u in YouTube().channel_uploads(300):
+            groups.setdefault(u["title"].strip(), []).append(u)
+        extras = []
+        for title, items in groups.items():
+            if len(items) > 1:
+                keep = min(items, key=lambda u: u["published"])
+                for row in self.db.query("SELECT id FROM videos WHERE title = ? AND youtube_id IS NULL", (title,)):
+                    self.db.update_video(row["id"], youtube_id=keep["id"], status="scheduled")
+                extras += [u for u in items if u["id"] != keep["id"]]
+        return extras
+
+    def delete_uploads(self, ids: list[str]) -> int:
+        from .youtube import YouTube
+        yt, n = YouTube(), 0
+        for i in ids:
+            try:
+                yt.delete(i)
+                n += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("Video silinemedi (%s): %s", i, e)
+        return n
 
     def _add_to_playlists(self, yt, row, yid: str) -> None:
         prof = profiles.current()

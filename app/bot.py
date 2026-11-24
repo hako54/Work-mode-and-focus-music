@@ -68,6 +68,7 @@ Bota video/fotoğraf gönder (en fazla 20 MB)
 /video &lt;link&gt; [link2 …] – 4K/büyük videoları Drive/Dropbox linkiyle ekle
 /arkaplan · /arkaplan sil &lt;ad&gt; · /arkaplan yenile [1.25] – yeniden işle + önizleme
 /youtube – YouTube bağlantısı düştüyse yeniden bağla
+/kopyalar – kanalda iki kez yüklenen videoları bul ve sil
 /hepsiniyukle – onay bekleyen tüm videoları yükle (cevap verilmezse 6 saat sonra kendiliğinden yüklenir)
 /atessesi – kullanılan ateş sesini dinlet · /atessesi ara – gerçek kayıtları dinle, seç · /atessesi sifirla
    Kendi ateş sesinizi kullanmak için bota ses dosyası gönderin (en az 15 sn)
@@ -123,7 +124,7 @@ class Bot:
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
             "video": self.cmd_video_link, "yogun": self.cmd_boost,
-            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube, "hepsiniyukle": self.cmd_upload_all,
+            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube, "hepsiniyukle": self.cmd_upload_all, "kopyalar": self.cmd_duplicates,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -463,6 +464,16 @@ class Bot:
                 await q.answer("Yetkiniz yok")
             return
         action, _, raw = (q.data or "").partition(":")
+        if action == "dupdel":  # /kopyalar onayı
+            ids = getattr(self, "_dup_ids", [])
+            if not ids:
+                await q.answer("Liste eski; /kopyalar yeniden yazın", show_alert=True)
+                return
+            self._dup_ids = []
+            await q.answer("Siliniyor…")
+            n = await asyncio.to_thread(self.pipe.delete_uploads, ids)
+            await q.message.reply_text(f"🗑 {n}/{len(ids)} kopya video silindi.")
+            return
         if action == "fs":  # ateş sesi adayı seçimi: fs:<n>
             try:
                 await asyncio.to_thread(firesound.choose, int(raw))
@@ -925,6 +936,20 @@ class Bot:
             await self.do_approve(r["id"])
             if self.db.get_setting("warned_yt_expired") == "1":
                 break
+
+    async def cmd_duplicates(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/kopyalar: kanalda iki kez yüklenmiş videoları bul; onaylarsanız fazlalarını sil (en eskisi kalır)."""
+        extras = await asyncio.to_thread(self.pipe.duplicate_uploads)
+        if not extras:
+            await update.message.reply_text("✅ Kanalda aynı başlıkla iki kez yüklenmiş video yok.")
+            return
+        self._dup_ids = [e["id"] for e in extras]
+        lines = "\n".join(f"• {html.escape(e['title'][:70])} — https://youtu.be/{e['id']}" for e in extras[:30])
+        await update.message.reply_html(
+            f"⚠️ <b>{len(extras)} kopya video</b> bulundu (her başlığın ilk yüklenen hali kalacak):\n{lines}",
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"🗑 {len(extras)} kopyayı sil",
+                                                                     callback_data="dupdel:go")]]))
 
     async def cmd_upload_all(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """/hepsiniyukle: onay bekleyen tüm videoları yükle."""

@@ -170,6 +170,32 @@ class YouTube:
             # Kanal telefonla doğrulanmamışsa 403 döner; yüklemeyi bozmasın.
             log.warning("Küçük resim ayarlanamadı: %s", _explain(e))
 
+    def channel_uploads(self, max_items: int = 200) -> list[dict]:
+        """Kanalın son yüklemeleri: [{id, title, published}] (yeniden eskiye). Liste başına 1 kota birimi."""
+        res = self.api.channels().list(part="contentDetails", mine=True).execute()
+        items = res.get("items", [])
+        if not items:
+            return []
+        pl = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        out, page = [], None
+        while len(out) < max_items:
+            r = self.api.playlistItems().list(part="snippet", playlistId=pl, maxResults=50, pageToken=page).execute()
+            for it in r.get("items", []):
+                sn = it["snippet"]
+                out.append({"id": sn["resourceId"]["videoId"], "title": sn["title"], "published": sn["publishedAt"]})
+            page = r.get("nextPageToken")
+            if not page:
+                break
+        return out
+
+    def find_uploaded(self, title: str) -> str | None:
+        """Aynı başlıkla zaten yüklenmiş video (yeniden yüklemeyi önlemek için)."""
+        same = [u for u in self.channel_uploads(100) if u["title"].strip() == title.strip()]
+        return min(same, key=lambda u: u["published"])["id"] if same else None
+
+    def delete(self, video_id: str) -> None:
+        self.api.videos().delete(id=video_id).execute()
+
     def ensure_playlist(self, title: str, description: str = "") -> str:
         page = None
         while True:

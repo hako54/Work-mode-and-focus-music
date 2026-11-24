@@ -165,6 +165,8 @@ def test_upload_is_never_repeated_after_playlist_error(tmp_path, monkeypatch):
             raise RuntimeError("429 RATE_LIMIT_EXCEEDED")
         def add_to_playlist(self, *a):
             pass
+        def find_uploaded(self, title):
+            return None
     fake_mod = types.SimpleNamespace(YouTube=FakeYT)
     monkeypatch.setitem(sys.modules, "app.youtube", fake_mod)
     monkeypatch.setattr(pl, "CONFIG", dataclasses.replace(pl.CONFIG, dry_run=False))
@@ -174,3 +176,28 @@ def test_upload_is_never_repeated_after_playlist_error(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         pipe.approve(vid)                    # tekrar onay: yeniden YÜKLENMEZ
     assert uploads == [db.video(vid)["title"]]
+
+
+def test_existing_channel_upload_is_reused(tmp_path, monkeypatch):
+    import dataclasses
+    import sys
+    import types
+    import app.pipeline as pl
+    from app.db import Database
+    db = Database(tmp_path / "r.db")
+    monkeypatch.setattr("app.pipeline.get_provider", lambda: FakeMusic())
+    pipe = pl.Pipeline(db)
+    db.set_setting("make_shorts", "0")
+    vid = pipe.create_daily(STYLES[0].key)
+
+    class FakeYT:
+        def upload(self, *a):
+            raise AssertionError("tekrar yüklenmemeli")
+        def find_uploaded(self, title):
+            return "already1"
+        def set_thumbnail(self, *a): pass
+        def ensure_playlist(self, *a): return "pl"
+        def add_to_playlist(self, *a): pass
+    monkeypatch.setitem(sys.modules, "app.youtube", types.SimpleNamespace(YouTube=FakeYT))
+    monkeypatch.setattr(pl, "CONFIG", dataclasses.replace(pl.CONFIG, dry_run=False))
+    assert pipe.approve(vid) == ["already1"] and db.video(vid)["youtube_id"] == "already1"
