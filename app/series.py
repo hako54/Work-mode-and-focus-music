@@ -37,7 +37,7 @@ SERIES: tuple[Series, ...] = (
          "candlelight_jazz_piano", "wedding_piano", "rainy_romance_piano", "classical_romance_piano",
          "dreamy_ambient_love", "fireside_love_ballad", "romantic_sax_lounge", "acoustic_love_guitar"),
         ("fireplace", "autumn", "winter", "candlelight", "sunset", "seaside", "flowers", "rain", "night_sky", "lake",
-         "forest", "picnic"),
+         "forest", "picnic", "rainy_bar"),
         "",
         ("Romantic evenings & date nights", "Couples & intimate moments", "Wine & candlelit dinners",
          "Cozy nights at home", "Relaxing after a long day", "Reading & quiet time", "Late-night relaxation",
@@ -52,7 +52,7 @@ SERIES: tuple[Series, ...] = (
         "jazz", "Cozy Jazz", "☕", "Cozy Jazz Music",
         ("cozy_jazz_cafe", "rainy_jazz_night", "bossa_nova_evening", "romantic_sax_lounge",
          "candlelight_jazz_piano"),
-        ("cafe", "fireplace", "rain", "city_night", "candlelight", "autumn", "winter", "sunset", "picnic"),
+        ("rainy_bar", "cafe", "fireplace", "rain", "city_night", "candlelight", "autumn", "winter", "sunset", "picnic"),
         "Cozy smooth jazz for a relaxing evening at home or in a quiet café: soft swing feel, warm upright bass, "
         "gentle brushed drums, mellow piano, saxophone or guitar sharing the melody, relaxed and laid-back, "
         "warm and intimate sound. " + _SOFT + " " + _ENSEMBLE,

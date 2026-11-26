@@ -23,7 +23,7 @@ IMAGE_LOOP_SEC = 40.0      # yapay zeka görselinden yapılan döngünün süres
 
 # tema -> parçacık türü
 THEME_PARTICLES = {"fireplace": "embers", "candlelight": "embers", "winter": "snow",
-                   "rain": None, "city_night": "dust"}
+                   "rain": None, "rainy_bar": None, "city_night": "dust"}
 FLICKER_THEMES = {"fireplace", "candlelight"}
 # parçacık türü -> (renk çarpanları r, g, b)
 TINT = {"embers": (1.0, 0.55, 0.18), "snow": (0.95, 0.97, 1.0), "dust": (1.0, 0.86, 0.62)}

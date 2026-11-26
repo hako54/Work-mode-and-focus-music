@@ -193,6 +193,19 @@ class YouTube:
         same = [u for u in self.channel_uploads(100) if u["title"].strip() == title.strip()]
         return min(same, key=lambda u: u["published"])["id"] if same else None
 
+    def append_description(self, video_id: str, text: str) -> None:
+        res = self.api.videos().list(part="snippet", id=video_id).execute()
+        items = res.get("items", [])
+        if not items:
+            return
+        sn = items[0]["snippet"]
+        if text in sn.get("description", ""):
+            return
+        body = {"id": video_id, "snippet": {"title": sn["title"], "categoryId": sn.get("categoryId", MUSIC_CATEGORY),
+                                            "description": (sn.get("description", "") + "\n\n" + text)[:4990],
+                                            "tags": sn.get("tags", [])}}
+        self.api.videos().update(part="snippet", body=body).execute()
+
     def delete(self, video_id: str) -> None:
         self.api.videos().delete(id=video_id).execute()
 

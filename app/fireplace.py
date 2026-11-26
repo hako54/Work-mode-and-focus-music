@@ -417,6 +417,48 @@ def reset_fire_sound() -> None:
         (cache_dir() / name).unlink(missing_ok=True)
 
 
+RAIN_THEMES = frozenset({"rain", "rainy_bar"})
+
+
+def rain_bed() -> Path:
+    """Yağmurlu temalar için dikişsiz yağmur sesi (önbellekli): ElevenLabs ses efekti, yoksa sentez."""
+    out = cache_dir() / "rain_bed_v1.m4a"
+    if out.exists():
+        return out
+    if CONFIG.elevenlabs_api_key and not CONFIG.dry_run:
+        try:
+            resp = requests.post(
+                "https://api.elevenlabs.io/v1/sound-generation",
+                headers={"xi-api-key": CONFIG.elevenlabs_api_key, "Content-Type": "application/json"},
+                json={"text": "Steady soft rain falling on a window and a quiet street at night, gentle continuous "
+                              "rain ambience, distant soft drops, no thunder, no music, no voices",
+                      "duration_seconds": 22, "prompt_influence": 0.6},
+                timeout=180)
+            if resp.status_code == 200 and resp.content:
+                raw = out.with_suffix(".raw.mp3")
+                raw.write_bytes(resp.content)
+                try:
+                    seamless_audio_loop(raw, out, xfade=3.0)
+                    return out
+                finally:
+                    raw.unlink(missing_ok=True)
+            log.warning("ElevenLabs yağmur sesi üretilemedi: %s", resp.status_code)
+        except Exception as e:  # noqa: BLE001
+            log.warning("ElevenLabs yağmur sesi üretilemedi: %s", e)
+    synth = out.with_name("rain_synth_v1.m4a")
+    if not synth.exists():   # yumuşak yağmur: pembe + kahverengi gürültü, tizler kısık, hafif dalgalanma
+        raw = synth.with_suffix(".raw.wav")
+        media.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anoisesrc=d=40:c=pink:a=0.5", "-f", "lavfi",
+                   "-i", "anoisesrc=d=40:c=brown:a=0.4", "-filter_complex",
+                   "[0][1]amix=inputs=2,highpass=f=200,lowpass=f=6000,"
+                   "volume='0.85+0.15*sin(2*PI*t/9)':eval=frame,aformat=channel_layouts=stereo", str(raw)])
+        try:
+            seamless_audio_loop(raw, synth, xfade=3.0)
+        finally:
+            raw.unlink(missing_ok=True)
+    return synth
+
+
 def _mean_volume(path: Path) -> float:
     proc = subprocess.run(["ffmpeg", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
                           capture_output=True, text=True)

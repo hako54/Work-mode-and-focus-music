@@ -92,6 +92,11 @@ THEMES: tuple[Theme, ...] = (
           "an intimate candlelit room with roses and warm soft light",
           ("candle flame close up", "romantic candles dinner", "candles bokeh"),
           ("candles roses", "candlelight dinner", "candle flame"), "🕯"),
+    Theme("rainy_bar", "Bar ve dans (yağmurlu)",
+          "a slow dance for two in a dimly lit jazz bar while rain falls softly outside",
+          "a dimly lit jazz bar on a rainy night, a couple slowly dancing, rain on the windows and warm amber lights",
+          ("jazz bar night rain window", "couple slow dancing bar", "dim cocktail bar night"),
+          ("couple dancing bar", "jazz bar rain window", "couple slow dance"), "💃"),
 )
 
 THEME_BY_KEY = {t.key: t for t in THEMES}
@@ -99,7 +104,7 @@ THEME_BY_KEY = {t.key: t for t in THEMES}
 # Başlıklarda kullanılan İngilizce adlar
 EN_LABEL = {"fireplace": "Fireplace", "picnic": "Autumn Picnic", "cafe": "Café", "city_night": "City Lights", "seaside": "Seaside", "autumn": "Autumn", "forest": "Forest", "rain": "Rainy Day",
             "winter": "Winter", "sunset": "Sunset", "flowers": "Rose Garden", "night_sky": "Starry Night",
-            "lake": "Lakeside", "candlelight": "Candlelight"}
+            "lake": "Lakeside", "candlelight": "Candlelight", "rainy_bar": "Rainy Jazz Bar"}
 
 # Stillere uygun temalar (seçimde öncelikli; geri kalanlar da arada çıkar).
 STYLE_THEMES: dict[str, tuple[str, ...]] = {
@@ -109,15 +114,15 @@ STYLE_THEMES: dict[str, tuple[str, ...]] = {
     "piano_strings_love": ("sunset", "flowers", "seaside"),
     "moonlight_piano": ("night_sky", "seaside", "lake"),
     "piano_cello_romance": ("autumn", "forest", "candlelight"),
-    "candlelight_jazz_piano": ("candlelight", "rain", "night_sky"),
-    "rainy_romance_piano": ("rain", "autumn", "winter"),
+    "candlelight_jazz_piano": ("rainy_bar", "candlelight", "rain", "night_sky"),
+    "rainy_romance_piano": ("rainy_bar", "rain", "autumn", "winter"),
     "classical_romance_piano": ("autumn", "flowers", "lake"),
     "wedding_piano": ("flowers", "sunset", "seaside"),
     "fireside_love_ballad": ("fireplace", "autumn", "winter", "forest", "rain"),
-    "romantic_sax_lounge": ("candlelight", "night_sky", "rain"),
+    "romantic_sax_lounge": ("rainy_bar", "candlelight", "night_sky", "rain"),
     "acoustic_love_guitar": ("seaside", "sunset", "flowers", "lake", "picnic"),
-    "cozy_jazz_cafe": ("cafe", "city_night", "rain", "fireplace"),
-    "rainy_jazz_night": ("rain", "cafe", "city_night"),
+    "cozy_jazz_cafe": ("rainy_bar", "cafe", "city_night", "rain", "fireplace"),
+    "rainy_jazz_night": ("rainy_bar", "rain", "cafe", "city_night"),
     "bossa_nova_evening": ("seaside", "sunset", "cafe"),
     "deep_sleep_ambient": ("night_sky", "lake", "winter"),
     "sleep_piano_rain": ("rain", "winter", "night_sky", "fireplace"),
@@ -133,7 +138,8 @@ ALIASES = {"şömine": "fireplace", "somine": "fireplace", "fireplace": "firepla
            "sonbahar": "autumn", "fall": "autumn", "gunbatimi": "sunset", "günbatımı": "sunset", "gun": "sunset",
            "gün": "sunset", "cicek": "flowers", "çiçek": "flowers", "gul": "flowers", "gül": "flowers",
            "gece": "night_sky", "yildiz": "night_sky", "yıldız": "night_sky", "ay": "night_sky", "moon": "night_sky",
-           "gol": "lake", "göl": "lake", "mum": "candlelight", "candle": "candlelight"}
+           "gol": "lake", "göl": "lake", "mum": "candlelight", "candle": "candlelight",
+           "bar": "rainy_bar", "dans": "rainy_bar", "dance": "rainy_bar", "rainy_bar": "rainy_bar"}
 
 
 @dataclass(frozen=True)
@@ -188,6 +194,10 @@ SCENES: dict[str, Scene] = {
     "candlelight": Scene(("candlelight dinner romantic", "candles dinner table night", "romantic candles"),
                          "by Candlelight", "Candlelit Dinner Ambience",
                          "an intimate candlelit dinner table for two with roses and warm soft light"),
+    "rainy_bar": Scene(("couple slow dancing jazz bar", "jazz bar night rain window", "dim bar warm lights night"),
+                       "in a Rainy Jazz Bar", "Rainy Jazz Bar Ambience",
+                       "a dimly lit jazz bar on a rainy night, a couple slowly dancing close, rain on the windows "
+                       "and warm amber lights"),
 }
 
 
@@ -224,6 +234,8 @@ PEOPLE_QUERIES: dict[str, tuple[str, ...]] = {
     "night_sky": ("couple under stars", "woman moonlight window", "couple night sky"),
     "lake": ("couple lake dock sunset", "woman lake sunrise", "couple lake romantic"),
     "candlelight": ("couple candlelight dinner", "woman candles romantic", "couple wine candles"),
+    "rainy_bar": ("couple slow dancing bar", "couple dancing jazz bar night", "couple slow dance dim light",
+                  "couple dancing in the rain night"),
     "picnic": ("couple autumn picnic", "woman picnic autumn forest", "couple picnic blanket"),
     "forest": ("couple forest walk", "woman forest sunlight", "couple cabin woods"),
     "seaside_relax": ("woman relaxing beach", "woman meditation sea", "woman yoga beach"),
@@ -264,13 +276,19 @@ def _find_theme_exact(text: str) -> Theme | None:
 
 
 def pick_theme(style_key: str, recent: list[str], rng: random.Random | None = None,
-               allowed: tuple[str, ...] | None = None) -> Theme:
-    """Stile uygun temayı tercih et; son 2 temayı tekrar etme. allowed: serinin izin verdiği temalar."""
+               allowed: tuple[str, ...] | None = None, weights: dict[str, float] | None = None) -> Theme:
+    """Stile uygun temayı tercih et; son 2 temayı tekrar etme. allowed: serinin izin verdiği temalar.
+
+    weights: tema -> ağırlık (ör. çok izlenen / beğenilen temalar 2-3 kat daha sık seçilir)."""
     rng = rng or random.Random()
+    weights = weights or {}
+
+    def choose(items: list[Theme]) -> Theme:
+        return rng.choices(items, weights=[weights.get(t.key, 1.0) for t in items], k=1)[0]
     pool = [t for t in THEMES if not allowed or t.key in allowed]
     preferred = [THEME_BY_KEY[k] for k in STYLE_THEMES.get(style_key, ())
                  if k not in recent[:2] and THEME_BY_KEY[k] in pool]
     others = [t for t in pool if t.key not in recent[:2] and t not in preferred]
     if preferred and (not others or rng.random() < 0.75):
-        return rng.choice(preferred)
-    return rng.choice(others or pool or list(THEMES))
+        return choose(preferred)
+    return choose(others or pool or list(THEMES))

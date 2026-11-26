@@ -882,3 +882,63 @@ def test_long_videos_get_focus_titles_except_sleep(pipe):
     assert validate_setting("long_focus_series", "jazz,relax") is None
     assert validate_setting("long_focus_series", "jazz,uzay")
     assert SERIES_BY_KEY["sleep"]
+
+
+def test_like_similar_and_continuation(pipe, monkeypatch):
+    import subprocess
+    from app import stock
+    db = pipe.db
+    db.set_setting("daily_visual", "fireplace")
+    monkeypatch.setattr(pipe, "SCENE_SHOT_SEC", 4.0)
+    monkeypatch.setattr(pipe, "SCENE_SHOT_XFADE", 1.0)
+    monkeypatch.setattr(pipe, "CONT_MIN_MIN", 1)
+    monkeypatch.setattr(pipe, "CONT_MAX_MIN", 1)
+    src = pipe.create_daily(series_key="jazz", theme_key="rainy_bar")
+    db.update_video(src, title="Let the Raindrops Slow Us Down 🌧️ Cozy Jazz Music | Rainy Jazz Bar Ambience",
+                    youtube_id="gJ1_f0yXZ0c", status="published", views=900)
+    for _ in range(2):
+        v = pipe.create_daily(series_key="jazz")
+        db.update_video(v, status="published", views=10)
+    # bulma: link, kelime, numara
+    assert pipe.find_video("https://youtu.be/gJ1_f0yXZ0c?si=abc")["id"] == src
+    assert pipe.find_video("raindrops")["id"] == src and pipe.find_video(f"#{src}")["id"] == src
+    with pytest.raises(ValueError):
+        pipe.find_video("hiç olmayan başlık")
+
+    sim = pipe.create_similar("raindrops")
+    assert db.track(db.video(sim)["track_id"])["theme"] == "rainy_bar"
+    assert "rainy_bar" in db.get_setting("fav_themes") and pipe.theme_weights()["rainy_bar"] >= 2
+
+    def clip(dest, name, color):
+        dest.mkdir(parents=True, exist_ok=True)
+        p = dest / f"{name}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:size=640x360:rate=30:duration=8",
+                        "-pix_fmt", "yuv420p", str(p)], check=True, capture_output=True)
+        return stock.StockItem(name, "video", p, 1.0)
+    monkeypatch.setattr(stock, "available", lambda: True)
+    monkeypatch.setattr(stock, "fetch_people_scene", lambda pq, plq, dest, used, rng, n=8: (
+        [clip(dest, "p1", "red"), clip(dest, "b1", "blue"), clip(dest, "p2", "red")],
+        [stock.StockItem("p1", "video", dest / "p1.mp4"), stock.StockItem("p2", "video", dest / "p2.mp4")]))
+    cont = pipe.create_continuation("https://youtu.be/gJ1_f0yXZ0c")
+    c = db.video(cont)
+    assert c["kind"] == "compilation" and c["ref_video_id"] == src and c["status"] == "pending"
+    assert c["title"].startswith("Let the Raindrops Slow Us Down • Part II") and len(c["title"]) <= 100
+    assert "https://youtu.be/gJ1_f0yXZ0c" in c["description"]
+    first = db.query("SELECT track_id FROM compilation_tracks WHERE video_id = ? ORDER BY position", (cont,))
+    assert first[0]["track_id"] == db.video(src)["track_id"]          # beğenilen parçayla başlar
+    assert media.duration(Path(c["video_path"])) >= 55
+    assert Path(c["thumb_path"]).name == "thumb_1.jpg"                 # kapak: videodaki kişilerden
+
+
+def test_rainy_themes_get_rain_bed(pipe, monkeypatch):
+    from app import fireplace
+    db = pipe.db
+    db.set_setting("daily_visual", "image")
+    db.set_setting("fireplace", "0")
+    calls = []
+    orig = media.add_bed
+    monkeypatch.setattr(media, "add_bed", lambda src, bed, out, vol, soft=True: calls.append(bed.name) or
+                        orig(src, bed, out, vol, soft))
+    pipe.create_daily(series_key="jazz", theme_key="rainy_bar")
+    assert calls and calls[-1].startswith("rain_")
+    assert fireplace.RAIN_THEMES >= {"rain", "rainy_bar"}

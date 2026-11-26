@@ -237,7 +237,187 @@ class Pipeline:
     def _pick_theme(self, style: Style, rng: random.Random, ser=None) -> Theme:
         recent = [r["theme"] for r in self.db.query(
             "SELECT theme FROM tracks WHERE theme IS NOT NULL ORDER BY id DESC LIMIT 5")]
-        return pick_theme(style.key, recent, rng, allowed=ser.themes if ser else None)
+        return pick_theme(style.key, recent, rng, allowed=ser.themes if ser else None, weights=self.theme_weights())
+
+    def theme_weights(self) -> dict[str, float]:
+        """Hangi tema daha çok izleniyor: ortalaması yüksek temalar 3 kata kadar daha sık seçilir;
+        /benzer ile beğenilen temalar ayrıca 2 kat."""
+        rows = self.db.query(
+            "SELECT t.theme, AVG(v.views) AS avg_views, COUNT(*) AS n FROM videos v JOIN tracks t ON t.id = v.track_id "
+            "WHERE v.kind = 'daily' AND v.status = 'published' AND t.theme IS NOT NULL GROUP BY t.theme")
+        avgs = {r["theme"]: r["avg_views"] or 0.0 for r in rows if r["n"] >= 1}
+        out: dict[str, float] = {}
+        if avgs:
+            med = sorted(avgs.values())[len(avgs) // 2] or 1.0
+            out = {k: max(0.5, min(3.0, v / med)) for k, v in avgs.items()}
+        for k in (self.db.get_setting("fav_themes") or "").split(","):
+            if k.strip():
+                out[k.strip()] = out.get(k.strip(), 1.0) * 2.0
+        return out
+
+    # ------------------------------------------------------------------ beğenilen videodan: benzer / devam
+    def find_video(self, ref: str):
+        """YouTube linki/kimliği, #numara ya da başlıktan bir parça -> ana (kısa olmayan) video satırı."""
+        import re
+        ref = ref.strip()
+        m = re.search(r"(?:youtu\.be/|v=|shorts/|live/)([\w-]{11})", ref) or re.fullmatch(r"([\w-]{11})", ref)
+        row = None
+        if m:
+            row = self.db.one("SELECT * FROM videos WHERE youtube_id = ?", (m.group(1),))
+        if row is None and re.fullmatch(r"#?\d+", ref):
+            row = self.db.one("SELECT * FROM videos WHERE id = ?", (int(ref.lstrip("#")),))
+        if row is None and not m:
+            row = self.db.one("SELECT * FROM videos WHERE kind = 'daily' AND title LIKE ? "
+                              "ORDER BY (youtube_id IS NOT NULL) DESC, id DESC LIMIT 1", (f"%{ref}%",))
+        if row is not None and row["parent_id"]:
+            row = self.db.video(row["parent_id"])
+        if row is None or not row["track_id"]:
+            raise ValueError("Video bulunamadı. YouTube linkini, #numarayı ya da başlıktan birkaç kelime yazın "
+                             "(ör. /devam raindrops).")
+        return row
+
+    def _like(self, video) -> None:
+        t = self.db.track(video["track_id"])
+        favs = [x for x in (self.db.get_setting("fav_themes") or "").split(",") if x]
+        if t["theme"] and t["theme"] not in favs:
+            self.db.set_setting("fav_themes", ",".join([*favs, t["theme"]][-4:]))
+
+    def create_similar(self, ref: str, progress: Progress = _noop) -> int:
+        """Beğenilen videonun serisi, stili ve temasıyla yeni parça + video (aynı tür insanlı sahne)."""
+        v = self.find_video(ref)
+        t = self.db.track(v["track_id"])
+        self._like(v)
+        visual_file = CONFIG.media_dir / f"video_{v['id']}" / "visual.txt"
+        visual = visual_file.read_text().strip() if visual_file.exists() else "people"
+        visual = visual if visual in ("people", "own", "scene") else "people"
+        progress(f"🎯 Beğendiğiniz videonun benzeri: {t['theme'] or '-'} teması, {STYLE_BY_KEY[t['style_key']].label}")
+        return self.create_daily(t["style_key"], progress, theme_key=t["theme"], visual=visual,
+                                 series_key=t["series"] or v["series"])
+
+    CONT_MIN_MIN, CONT_MAX_MIN = 60, 120
+
+    def create_continuation(self, ref: str, progress: Progress = _noop) -> int:
+        """'Devamı': beğenilen parça + aynı seri/temadan benzerleri, 1-2 saat; aynı tür insanlı sahneler döner.
+
+        Yeni müzik üretmez (kredisiz). Başlık: '<orijinal ad> • Part II …', açıklamalar birbirine link verir."""
+        import re
+        src = self.find_video(ref)
+        st = self.db.track(src["track_id"])
+        ser = series_mod.get(st["series"] or src["series"]) if (st["series"] or src["series"]) else \
+            series_mod.of_style(st["style_key"])
+        theme = THEME_BY_KEY.get(st["theme"] or "") or THEME_BY_KEY["rain"]
+        self._like(src)
+        rng = random.Random()
+        x = float(self.db.get_setting("mix_crossfade_sec") or 6)
+        rows = [r for r in self.db.query("SELECT * FROM tracks WHERE audio_path IS NOT NULL AND id != ?", (st["id"],))
+                if Path(r["audio_path"]).exists()
+                and (r["series"] or series_mod.of_style(r["style_key"]).key) == ser.key]
+        views = {r["track_id"]: r["views"] or 0 for r in self.db.query(
+            "SELECT track_id, MAX(views) AS views FROM videos WHERE track_id IS NOT NULL GROUP BY track_id")}
+        rows.sort(key=lambda r: (r["theme"] != theme.key, -views.get(r["id"], 0)))
+        base = [st, *rows[:9]]
+        if len(base) < 2:
+            raise ValueError(f"{ser.label} serisinde devam videosu için yeterli parça yok.")
+        # disk: bu video ~1,1 MB/sn yer tutar (döngü bit hızı 2 Mbps ile sınırlı) + ses
+        self.housekeeping()
+        rate = 2.3e6 / 8 + self.AUDIO_BYTES_PER_SEC
+        fit = (self.free_bytes() - 2 * self.SAFETY_BYTES) / rate * 0.9
+        lo, hi = self.CONT_MIN_MIN * 60, self.CONT_MAX_MIN * 60
+        hi = int(min(hi, fit))
+        if hi < 30 * 60:
+            self.ensure_space(int(30 * 60 * rate + self.SAFETY_BYTES), "devam videosu", progress)
+        target = rng.randint(min(lo, hi), hi)
+        chosen, total = [], 0.0
+        while total < target:
+            for r in base:
+                if total >= target:
+                    break
+                chosen.append(r)
+                total += (r["duration_sec"] or 0) - x
+        video_id = self.db.add_video(kind="compilation", style_key=st["style_key"], status="building",
+                                     series=ser.key, ref_video_id=src["id"], source="manual")
+        d = self._dir(f"video_{video_id}")
+        try:
+            progress(f"🎚 {len(base)} parça ({len(chosen)} bölüm) birleştiriliyor: ~{media.fmt_long(total)}")
+            rain_vol = int(self.db.get_setting("rain_volume") or 0)
+            bed, vol = None, 0.0
+            if theme.key in fireplace.RAIN_THEMES and rain_vol > 0:
+                bed, vol = fireplace.rain_bed(), rain_vol / 100
+            elif theme.key == "fireplace" and self._fire_volume() > 0:
+                bed, vol = fireplace.ambience_bed(), self._fire_volume() / 100
+            paths = [Path(r["audio_path"]) for r in chosen]
+            starts = media.crossfade_concat(paths, d / "mix.mp3", xfade=self._fades(paths, x), bed=bed, bed_volume=vol)
+            with self.db.tx() as c:
+                for pos, (r, s0) in enumerate(zip(chosen, starts)):
+                    c.execute("INSERT INTO compilation_tracks(video_id, track_id, position, start_sec) "
+                              "VALUES (?, ?, ?, ?)", (video_id, r["id"], pos, s0))
+            progress(f"🎬 {theme.emoji} Aynı tür sahneler hazırlanıyor (aynı kişiler)")
+            loop = self._continuation_visuals(video_id, theme, ser, rng)
+            progress("✍️ Başlık ve açıklama yazılıyor")
+            tracklist, total = self._compilation_tracklist(video_id)
+            head = re.match(r"[A-Za-z0-9 ,'’&!?.\-]+", (src["title"] or "").split(" | ")[0])
+            head = (head.group(0).strip() if head else "") or (st["name"] or "Rainy Night")
+            focus = self.long_focus(ser.key)
+            meta = metadata.generate(
+                "compilation", STYLE_BY_KEY[st["style_key"]], total, SCENES.get(theme.key, SCENES["rain"]).text,
+                self.recent_titles(), series_key=ser.key, focus=focus,
+                extra=f"This is the extended continuation (Part II) of the channel's popular video \"{head}\", "
+                      "with more of the same mood and visuals.")
+            ambience = SCENES[theme.key].ambience if theme.key in SCENES else f"{ser.label} Ambience"
+            title = f"{head} • Part II {theme.emoji} {media.fmt_long(total)} {ser.genre}" + \
+                (" for Deep Focus" if focus else "") + f" | {ambience}"
+            if len(title) > 100:
+                title = f"{head} • Part II {theme.emoji} {media.fmt_long(total)} | {ambience}"
+            links = (f"▶️ The original video: https://youtu.be/{src['youtube_id']}" if src["youtube_id"] else "")
+            tags_line = ((metadata.FOCUS_HASHTAGS + " ") if focus else "") + ser.hashtags
+            desc = metadata.full_description(meta.description, tracklist, extra_links=links, hashtags=tags_line)
+            self.db.update_video(video_id, title=metadata.shorten(title, 100), description=desc, tags=meta.tags,
+                                 thumbnail_text=meta.thumbnail_text)
+            progress("🎬 Uzun video render ediliyor")
+            out = media.mux(loop, d / "mix.mp3", d / "video.mp4")
+            preview = media.make_preview(d / "mix.mp3", d / "preview.mp3", max_seconds=600)
+            thumb = self._thumb_candidates(video_id, d / "image.png", meta.thumbnail_text or "PART II",
+                                           media.fmt_long(total).upper(), ())
+            self.db.update_video(video_id, video_path=str(out), preview_path=str(preview), thumb_path=str(thumb),
+                                 status="pending")
+        except Exception as e:
+            self.db.update_video(video_id, status="failed", error=str(e)[:1000])
+            self.housekeeping()
+            raise
+        return video_id
+
+    def _continuation_visuals(self, video_id: int, theme: Theme, ser, rng: random.Random) -> Path:
+        """12 farklı çekim (insanlı olanlar hep aynı kişiler), 25'er sn: ~5 dk'lık döngü; bit hızı 2 Mbps."""
+        d = self._dir(f"video_{video_id}")
+        used = {r["provider_id"] for r in self.db.query("SELECT provider_id FROM stock_used")}
+        items, people_items = (stock.fetch_people_scene(people_queries(theme.key, ser.key),
+                                                        SCENES.get(theme.key, SCENES["rain"]).queries,
+                                                        d / "stock", used, rng, n=12)
+                               if stock.available() else ([], []))
+        raw = d / "collage_raw.mp4"
+        loop = d / "collage.mp4"
+        try:
+            if len(items) >= 2:
+                stock.build_collage(items, raw, (1920, 1080), seg_sec=self.SCENE_SHOT_SEC,
+                                    xfade=self.SCENE_SHOT_XFADE, min_items=2)
+                media.run(["ffmpeg", "-y", "-i", str(raw), "-an", "-c:v", "libx264", "-preset", "medium",
+                           "-crf", "23", *fireplace.LOOP_MAXRATE, "-g", str(media.FPS * 2), "-pix_fmt", "yuv420p",
+                           str(loop)])
+                fireplace.still_frame(fireplace.Background("video", loop), d / "image.png")
+                for n, it in enumerate(people_items[:3], 1):
+                    fireplace.still_frame(fireplace.Background("video", it.path), d / f"people_frame_{n}.png")
+                with self.db.tx() as c:
+                    for it in items:
+                        c.execute("INSERT OR IGNORE INTO stock_used(provider_id, theme, used_at) VALUES (?, ?, ?)",
+                                  (it.provider_id, theme.key, iso(utcnow())))
+                return loop
+        finally:
+            raw.unlink(missing_ok=True)
+            shutil.rmtree(d / "stock", ignore_errors=True)
+        # sahne bulunamazsa: şömine arka planı
+        self._compilation_visuals(video_id, STYLE_BY_KEY[self.db.video(video_id)["style_key"]], rng, render=False)
+        bg = self._background(video_id)
+        return fireplace.loop_for(bg, (1920, 1080)) if bg else media.make_loop(d / "image.png", d / "loop.mp4")
 
     def next_series(self):
         """Otomatik sıradaki seri: son otomatik parçanın serisinden sonraki (ilk kez: romance)."""
@@ -546,12 +726,15 @@ class Pipeline:
     def _video_audio(self, video_id: int, track_audio: Path) -> Path:
         """Şömine modunda parçanın altına çıtırtı ekle (kütüphanedeki parça temiz kalır)."""
         theme = self._theme_of(video_id)
+        out = self._dir(f"video_{video_id}") / "audio.mp3"
+        soft = self.db.get_setting("soft_master") == "1"
+        rain_vol = int(self.db.get_setting("rain_volume") or 0)
+        if theme is not None and theme.key in fireplace.RAIN_THEMES and rain_vol > 0 and not self._background(video_id):
+            return media.add_bed(track_audio, fireplace.rain_bed(), out, rain_vol / 100, soft=soft)
         fire_scene = theme is not None and theme.key == "fireplace"   # stok şömine sahnesinde de ateş sesi
         if not (self._background(video_id) or fire_scene) or self._fire_volume() <= 0:
             return track_audio
-        out = self._dir(f"video_{video_id}") / "audio.mp3"
-        return media.add_bed(track_audio, fireplace.ambience_bed(), out, self._fire_volume() / 100,
-                             soft=self.db.get_setting("soft_master") == "1")
+        return media.add_bed(track_audio, fireplace.ambience_bed(), out, self._fire_volume() / 100, soft=soft)
 
     def _write_meta(self, video_id: int, style: Style, scene: str) -> None:
         v = self.db.video(video_id)
@@ -1429,6 +1612,14 @@ class Pipeline:
                         self._add_to_playlists(yt, row, yid)
                     except Exception as e:  # noqa: BLE001 — ör. YouTube 429 hız sınırı: video yine de yüklendi
                         log.warning("Playlist'e eklenemedi (%s): %s", yid, e)
+                    ref = row["ref_video_id"] if "ref_video_id" in row.keys() else None
+                    src = self.db.video(ref) if ref else None
+                    if src is not None and src["youtube_id"]:
+                        try:   # orijinal videonun açıklamasına "devamı" linki
+                            yt.append_description(src["youtube_id"],
+                                                  f"🎧 Part II (extended version): https://youtu.be/{yid}")
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("Orijinal videoya link eklenemedi: %s", e)
                 ids.append(yid)
                 self._cleanup_after_upload(row)
             except Exception as e:

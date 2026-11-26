@@ -51,6 +51,8 @@ HELP_PRODUCTION = {
    ör. /uret jazz kafe sahne · /uret uyku yagmur · /uret sonbahar
    kendi = kendi şömine videon · insan = çiftli/kadınlı stok video · ai = yapay zeka görseli (durağan)
 /derleme [seri] – en çok dinlenenlerden uzun video (kredisiz)
+/benzer &lt;link|başlık&gt; – beğendiğin videonun benzeri (aynı tema ve sahne türü)
+/devam &lt;link|başlık&gt; – beğendiğin videonun 1-2 saatlik Part II devamı (kredisiz)
 /yogun [gün] – o kadar gün günde 2 video (önce hazır parçalar) · /yogun kapat
 /kapakornek [tema] [seri] – örnek kapaklar (çift/kadın fotoğraflı, kredisiz)
 /mix [dk] – tamamı yeni parçalardan uzun mix (çok kredi harcar)
@@ -124,7 +126,7 @@ class Bot:
             "demo": self.cmd_generate, "mix": self.cmd_demo, "parcalar": self.cmd_tracks, "temalar": self.cmd_themes,
             "kullanilan": self.cmd_used, "dinle": self.cmd_listen, "seriler": self.cmd_series,
             "video": self.cmd_video_link, "yogun": self.cmd_boost,
-            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube, "hepsiniyukle": self.cmd_upload_all, "kopyalar": self.cmd_duplicates,
+            "kapakornek": self.cmd_cover_examples, "arkaplan": self.cmd_backgrounds, "atessesi": self.cmd_fire_sound, "youtube": self.cmd_youtube, "hepsiniyukle": self.cmd_upload_all, "kopyalar": self.cmd_duplicates, "benzer": self.cmd_similar, "devam": self.cmd_continuation,
         }
         for name, fn in cmds.items():
             self.app.add_handler(CommandHandler(name, fn, filters=admin))
@@ -407,6 +409,41 @@ class Bot:
             log.exception("Mix üretim hatası")
             await self.notify(f"⚠️ Uzun mix üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>\n"
                               "Üretilen parçalar kütüphanede kaldı; bir sonraki /uret onları kullanır.")
+
+    async def cmd_similar(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/benzer <YouTube linki | #numara | başlıktan kelime>: beğenilen videonun benzeri (yeni parça)."""
+        await self._from_liked(update, ctx, "similar")
+
+    async def cmd_continuation(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/devam <YouTube linki | #numara | başlıktan kelime>: o videonun 1-2 saatlik 'Part II' devamı."""
+        await self._from_liked(update, ctx, "continuation")
+
+    async def _from_liked(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE, what: str) -> None:
+        ref = " ".join(ctx.args or []).strip()
+        cmd = "/benzer" if what == "similar" else "/devam"
+        if not ref:
+            await update.message.reply_html(f"Kullanım: <code>{cmd} https://youtu.be/…</code> ya da "
+                                            f"<code>{cmd} raindrops</code> (başlıktan bir kelime) ya da <code>{cmd} 54</code>")
+            return
+        try:
+            src = self.pipe.find_video(ref)
+        except ValueError as e:
+            await update.message.reply_text(str(e))
+            return
+        label = ("benzeri üretiliyor (yeni parça, aynı seri/tema/sahne türü)" if what == "similar" else
+                 "devamı hazırlanıyor (1-2 saat, Part II; kredisiz, 20-40 dk sürebilir)")
+        await update.message.reply_html(f"🎯 #{src['id']} <b>{html.escape(src['title'] or '')}</b>\n{label}")
+
+        async def run() -> None:
+            try:
+                fn = self.pipe.create_similar if what == "similar" else self.pipe.create_continuation
+                vid = await self.run_heavy("benzer video" if what == "similar" else "devam videosu",
+                                           lambda progress: fn(ref, progress))
+                await self.send_card(vid)
+            except Exception as e:  # noqa: BLE001
+                log.exception("Beğenilen videodan üretim hatası")
+                await self.notify(f"⚠️ Üretilemedi:\n<code>{html.escape(str(e)[:800])}</code>")
+        asyncio.create_task(run())
 
     async def do_compilation(self, series_key: str | None = None) -> None:
         try:
@@ -1460,7 +1497,7 @@ def validate_setting(key: str, value: str) -> str | None:
         return "0 veya 1 olmalı"
     if key in ("bg_rotate_min_min", "bg_rotate_max_min") and not 5 <= n <= 120:
         return "5–120 dk arası olmalı"
-    if key == "fire_volume" and not 0 <= n <= 100:
+    if key in ("fire_volume", "rain_volume") and not 0 <= n <= 100:
         return "0–100 arası olmalı"
     if key == "soft_master" and n not in (0, 1):
         return "0 veya 1 olmalı"

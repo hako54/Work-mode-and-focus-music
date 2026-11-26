@@ -98,6 +98,8 @@ class Database:
                 c.execute("ALTER TABLE videos ADD COLUMN source TEXT")
             if "series" not in vcols:  # romance | jazz | sleep | relax
                 c.execute("ALTER TABLE videos ADD COLUMN series TEXT")
+            if "ref_video_id" not in vcols:  # /devam: hangi videonun devamı (açıklamalar birbirine link verir)
+                c.execute("ALTER TABLE videos ADD COLUMN ref_video_id INTEGER")
             if "series" not in {r[1] for r in c.execute("PRAGMA table_info(tracks)")}:
                 c.execute("ALTER TABLE tracks ADD COLUMN series TEXT")
 
